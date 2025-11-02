@@ -1,0 +1,227 @@
+import React, { useEffect, useState } from "react";
+import { apiMyTasks, apiUpdateTaskItem, apiGetNotice } from "../lib/api";
+import { useAuth } from "../contexts/AuthContext";
+
+export default function Profile() {
+  const { user } = useAuth();
+
+  const [tasks, setTasks] = useState([]); // [{id, title, items: [{id,text,done,comment}, ...]}, ...]
+  const [notice, setNotice] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+
+  // drafts = نسخة editable محلية لكل item
+  // drafts[itemId] = { done: boolean, comment: string }
+  const [drafts, setDrafts] = useState({});
+
+  // تحميل التاسكات + ملاحظة الأدمن أول مرة
+  useEffect(() => {
+    (async () => {
+      try {
+        const [t, n] = await Promise.all([apiMyTasks(), apiGetNotice()]);
+
+        setTasks(t || []);
+        setNotice(n?.content || "");
+
+        // حضّر نسخة editable للـdrafts من الداتا اللي جاية من السيرفر
+        const initDrafts = {};
+        (t || []).forEach((task) => {
+          task.items.forEach((it) => {
+            initDrafts[it.id] = {
+              done: !!it.done,
+              comment: it.comment || "",
+            };
+          });
+        });
+        setDrafts(initDrafts);
+      } catch (e) {
+        setErr(e.message || "Failed to load data");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  // تحديث الـcheckbox محلي فقط
+  const toggleDoneLocal = (itemId) => {
+    setDrafts((prev) => ({
+      ...prev,
+      [itemId]: {
+        ...prev[itemId],
+        done: !prev[itemId]?.done,
+      },
+    }));
+  };
+
+  // تحديث الـcomment محلي فقط أثناء الكتابة
+  const updateCommentLocal = (itemId, val) => {
+    setDrafts((prev) => ({
+      ...prev,
+      [itemId]: {
+        ...prev[itemId],
+        comment: val,
+      },
+    }));
+  };
+
+  // حفظ بند واحد في الـ backend ثم مزامنة الـtasks في الواجهة
+  const saveItem = async (taskId, itemId) => {
+    const draft = drafts[itemId];
+    if (!draft) return;
+
+    // ابعت التغييرات للسيرفر
+    const updatedFromServer = await apiUpdateTaskItem(itemId, {
+      done: draft.done,
+      comment: draft.comment,
+    });
+
+    // عكس التعديل في tasks (عشان اللي ظاهر للمستخدم يبقى synced)
+    setTasks((prevTasks) =>
+      prevTasks.map((task) => {
+        if (task.id !== taskId) return task;
+        return {
+          ...task,
+          items: task.items.map((it) =>
+            it.id === itemId ? { ...it, ...updatedFromServer } : it
+          ),
+        };
+      })
+    );
+
+    // مافيش داعي نعدل drafts تاني لأن قيمة drafts أصلاً هي اللي بعتناها
+    // ولو السيرفر رجّع حاجة مختلفة، سبتّها انعكست فوق في tasks (الجزء اللي بيبان read-only زي text)
+  };
+
+  if (loading) {
+    return <div className="p-6 text-sm text-gray-600">Loading...</div>;
+  }
+
+  if (err) {
+    return <div className="p-6 text-sm text-red-600 font-medium">{err}</div>;
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto p-6 space-y-8">
+      {/* معلومات الحساب */}
+      <section className="bg-white shadow rounded-xl border border-gray-200 p-6">
+        <h1 className="text-lg font-semibold text-gray-900 mb-4">My Profile</h1>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm text-gray-800">
+          <div>
+            <span className="font-medium text-gray-600">Name: </span>
+            {user?.name}
+          </div>
+          <div>
+            <span className="font-medium text-gray-600">Email: </span>
+            {user?.email}
+          </div>
+          <div>
+            <span className="font-medium text-gray-600">Role: </span>
+            {user?.role}
+          </div>
+        </div>
+      </section>
+
+      {/* ملاحظات الأدمن (الدفتر العام) */}
+      {notice?.trim() && (
+        <section className="bg-white shadow rounded-xl border border-yellow-200 p-6 bg-yellow-50/50">
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">
+            Admin Notice
+          </h2>
+          <div className="text-sm text-gray-800 whitespace-pre-line leading-relaxed">
+            {notice}
+          </div>
+        </section>
+      )}
+
+      {/* المهام المطلوبة */}
+      {user.role !== "ADMIN" && (
+        <section className="bg-white shadow rounded-xl border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+            Required Tasks
+          </h2>
+
+          {tasks.length === 0 ? (
+            <div className="text-sm text-gray-500">
+              No tasks assigned to you.
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {tasks.map((task) => (
+                <div
+                  key={task.id}
+                  className="bg-gray-50 border border-gray-300 rounded-lg p-4"
+                >
+                  {/* عنوان المهمة */}
+                  <div className="font-medium text-gray-900 text-base mb-4">
+                    {task.title}
+                  </div>
+
+                  {/* البنود */}
+                  <div className="space-y-4 text-sm">
+                    {task.items.map((item) => {
+                      const d = drafts[item.id] || {
+                        done: !!item.done,
+                        comment: item.comment || "",
+                      };
+
+                      return (
+                        <div
+                          key={item.id}
+                          className="bg-white border border-gray-200 rounded-lg p-4"
+                        >
+                          {/* السطر العلوي: checkbox + نص البند */}
+                          <div className="flex items-start gap-3">
+                            <input
+                              type="checkbox"
+                              className="mt-1 w-4 h-4 text-blue-600 rounded border-gray-300 cursor-pointer"
+                              checked={d.done}
+                              onChange={() => toggleDoneLocal(item.id)}
+                            />
+
+                            <div className="flex-1">
+                              <div
+                                className={`text-sm font-medium ${
+                                  d.done
+                                    ? "text-gray-400 line-through"
+                                    : "text-gray-800"
+                                }`}
+                              >
+                                {item.text}
+                              </div>
+
+                              {/* ملاحظتي / الرد بتاعي */}
+                              <div className="mt-3">
+                                <textarea
+                                  className="input-field w-full min-h-[120px] text-sm leading-relaxed"
+                                  placeholder="اكتب ملاحظتك: خلصت ايه / ايه اللي واقف / لو حاجة ما اتعملتش ليه..."
+                                  value={d.comment}
+                                  onChange={(e) =>
+                                    updateCommentLocal(item.id, e.target.value)
+                                  }
+                                />
+                              </div>
+
+                              {/* زرار حفظ */}
+                              <div className="mt-3 flex justify-end">
+                                <button
+                                  onClick={() => saveItem(task.id, item.id)}
+                                  className="bg-blue-600 text-white text-xs font-medium px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                                >
+                                  Save Update
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  );
+}

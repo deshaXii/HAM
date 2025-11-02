@@ -1,0 +1,30 @@
+{
+  "name": "fleet-ai-server",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/local-dev.js",
+    "start": "node src/local-dev.js",
+    "prisma:generate": "prisma generate",
+    "postinstall": "prisma generate --accelerate",
+    "prisma:migrate": "prisma migrate dev --name init --skip-generate",
+    "prisma:push": "prisma db push"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.18.0",
+    "@prisma/extension-accelerate": "^2.0.2",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0"
+  },
+  "devDependencies": {
+    "prisma": "^5.22.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

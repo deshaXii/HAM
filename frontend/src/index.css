@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: "Inter", system-ui, sans-serif;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2;
+  }
+
+  .btn-secondary {
+    @apply bg-gray-200 text-gray-900 px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2;
+  }
+
+  .card {
+    @apply bg-white rounded-lg shadow-sm border border-gray-200;
+  }
+
+  .input-field {
+    @apply w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent;
+  }
+}
+
+/* Drag and drop styles */
+.dnd-handle {
+  cursor: grab;
+}
+
+.dnd-handle:active {
+  cursor: grabbing;
+}
+
+.dnd-overlay {
+  background-color: rgba(59, 130, 246, 0.1);
+  border: 2px dashed #3b82f6;
+}
+.tiny-scrollbar {
+  scrollbar-width: thin; /* Firefox: 'thin' is the smallest available */
+  scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
+}
+.tiny-scrollbar::-webkit-scrollbar {
+  width: 1px;
+  height: 1px;
+}
+.tiny-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.25);
+  border-radius: 9999px;
+}
+.tiny-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
