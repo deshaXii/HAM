@@ -1,7 +1,7 @@
 // src/lib/api.js
 
 // Simple API client for the new backend
-const API_BASE = (
+const BASE = (
   import.meta.env.VITE_API_URL || `${window.location.origin}/api`
 ).replace(/\/+$/, "");
 
