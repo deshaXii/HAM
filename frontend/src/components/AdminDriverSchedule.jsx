@@ -11,14 +11,7 @@ const DAYS = [
   { label: "Sun", val: 0 },
 ];
 
-/*
-props:
- - drivers: state.drivers (array)
- - onSaveDrivers(nextDriversArray): function
-    -> In parent (e.g., admin screen) you would do:
-       persistIfAdmin({ ...state, drivers: nextDriversArray })
-*/
-
+// helpers
 function initialsOf(name) {
   return (
     (name || "")
@@ -30,21 +23,32 @@ function initialsOf(name) {
   );
 }
 
+/*
+props:
+ - drivers: state.drivers
+ - onSaveDrivers(nextDriversArray): function
+*/
+
 export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
 
+  // نعمل normalizing لكل driver جاي من الباك
   const [local, setLocal] = useState(
     (drivers || []).map((d) => ({
       id: d.id,
       name: d.name || "",
       code: d.code || "",
-      photoUrl: d.photoUrl || "", // <-- مهم لعرض الصورة
+      photoUrl: d.photoUrl || "",
+      // دول موجودين في الـ response عندك
       canNight: !!d.canNight,
-      twoManOk: !!d.twoManOk,
+      sleepsInCab: !!d.sleepsInCab,
+      doubleMannedEligible: !!d.doubleMannedEligible,
+      // أهم سطر 👇 لو السيرفر ما بعتش weekAvailability
       weekAvailability: Array.isArray(d.weekAvailability)
         ? d.weekAvailability
         : [1, 2, 3, 4, 5],
+      // أجازات اليوم الواحد
       leaves: Array.isArray(d.leaves) ? d.leaves : [],
     }))
   );
@@ -91,13 +95,22 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
   }
 
   function saveAll() {
-    onSaveDrivers &&
-      onSaveDrivers(
-        local.map((d) => ({
-          ...d,
-          // نحافظ على نفس الشكل اللي بتستخدمه بقية الصفحات
-        }))
-      );
+    // لازم نرجّع نفس شكل الداتا اللي التخطيط والباك إند متوقعينه
+    const normalized = local.map((d) => ({
+      id: d.id,
+      name: d.name,
+      code: d.code,
+      photoUrl: d.photoUrl,
+      canNight: !!d.canNight,
+      sleepsInCab: !!d.sleepsInCab,
+      doubleMannedEligible: !!d.doubleMannedEligible,
+      weekAvailability: Array.isArray(d.weekAvailability)
+        ? d.weekAvailability.slice().sort()
+        : [],
+      leaves: Array.isArray(d.leaves) ? d.leaves : [],
+    }));
+
+    onSaveDrivers && onSaveDrivers(normalized);
   }
 
   return (
@@ -126,10 +139,9 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
             key={drv.id}
             className="bg-white border border-gray-200 rounded-lg shadow-sm p-4"
           >
-            {/* Header row */}
+            {/* header */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
               <div className="flex items-center gap-3 min-w-0">
-                {/* Avatar (صورة أو اختصار الاسم) */}
                 {drv.photoUrl ? (
                   <img
                     src={drv.photoUrl}
@@ -141,7 +153,6 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
                     {initialsOf(drv.name)}
                   </div>
                 )}
-
                 <div className="min-w-0">
                   <div className="text-gray-900 font-semibold text-sm truncate">
                     {drv.name || "(no name)"}{" "}
@@ -155,28 +166,37 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
                 </div>
               </div>
 
-              <div className="flex items-center gap-4 text-xs">
+              <div className="flex items-center gap-4 text-xs flex-wrap">
                 <label className="flex items-center gap-2 cursor-pointer select-none">
                   <input
                     type="checkbox"
                     checked={drv.canNight}
                     onChange={() => toggleField(drv.id, "canNight")}
                   />
-                  <span className="text-gray-700">Night Shift OK</span>
+                  <span className="text-gray-700">Night shift OK</span>
                 </label>
 
                 <label className="flex items-center gap-2 cursor-pointer select-none">
                   <input
                     type="checkbox"
-                    checked={drv.twoManOk}
-                    onChange={() => toggleField(drv.id, "twoManOk")}
+                    checked={drv.sleepsInCab}
+                    onChange={() => toggleField(drv.id, "sleepsInCab")}
                   />
-                  <span className="text-gray-700">2-man Eligible</span>
+                  <span className="text-gray-700">Sleeps in cab</span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={drv.doubleMannedEligible}
+                    onChange={() => toggleField(drv.id, "doubleMannedEligible")}
+                  />
+                  <span className="text-gray-700">2-man eligible</span>
                 </label>
               </div>
             </div>
 
-            {/* Week availability */}
+            {/* days */}
             <div className="mb-4">
               <div className="text-xs font-medium text-gray-800 mb-2">
                 Works on days:
@@ -197,11 +217,12 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
                 ))}
               </div>
               <div className="text-[11px] text-gray-500 mt-1">
-                If day is not checked → driver should not work on this day.
+                If a day is not checked → driver should not be auto-assigned on
+                this day.
               </div>
             </div>
 
-            {/* Leaves */}
+            {/* leaves */}
             <div className="mb-4">
               <div className="text-xs font-medium text-gray-800 mb-2">
                 Leave days (comma-separated ISO dates):
@@ -211,17 +232,19 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
                 value={drv.leaves.join(", ")}
                 rows={2}
                 onChange={(e) => updateLeaves(drv.id, e.target.value)}
-                placeholder="2025-10-21, 2025-11-01"
+                placeholder="2025-12-04, 2025-12-05"
               />
               <div className="text-[11px] text-gray-500 mt-1">
-                Driver is not allowed to be assigned on these days at all.
+                These days are completely blocked for this driver.
               </div>
             </div>
 
             <div className="text-[11px] text-gray-500 border-t pt-2">
-              - Night Shift OK = Can work night shifts.
-              <br />- 2-man Eligible = This driver is allowed to be part of
-              2-driver teams (but tractor must also be doubleManned).
+              - Night shift OK = can be used in night jobs.
+              <br />
+              - Sleeps in cab = can do overnight trips requiring cab.
+              <br />- 2-man eligible = driver can be on double-manned jobs
+              (tractor must allow double man too).
             </div>
           </div>
         ))}

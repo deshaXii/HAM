@@ -1,113 +1,81 @@
 import React, { useState, useEffect } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-
 import { apiGetState, apiSaveState } from "../lib/api";
-import AdminDriverSchedule from "./AdminDriverSchedule";
+import AdminDriverSchedule from "../components/AdminDriverSchedule";
 
 export default function AdminDriversPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
 
-  // If not logged in at all
   if (!user) {
     return <Navigate to="/login" replace />;
   }
 
-  // Main state coming from backend (/state)
   const [fullState, setFullState] = useState(null);
-
-  // Loading state
   const [loading, setLoading] = useState(true);
-
-  // Saving state in case you want to show spinner or disable button
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
-  // Get state when page opens
   useEffect(() => {
     (async () => {
       try {
         const apiState = await apiGetState();
-
-        // Ensure drivers array exists even if server doesn't return it
         const safeState = {
           ...apiState,
           drivers: Array.isArray(apiState?.drivers) ? apiState.drivers : [],
         };
-
         setFullState(safeState);
       } catch (err) {
         console.error("Failed to load state for drivers page:", err);
-        setFullState({
-          drivers: [],
-        });
+        setError("Failed to load drivers");
+        setFullState({ drivers: [] });
       } finally {
         setLoading(false);
       }
     })();
   }, []);
 
-  // Function we'll pass to AdminDriverSchedule for when Save is clicked
-  async function handleSaveDrivers(nextDriversArray) {
-    if (!isAdmin) return;
+  async function handleSaveDrivers(nextDrivers) {
+    if (!fullState) return;
+    setSaving(true);
+    setError("");
 
-    // Prepare new version of state
     const nextState = {
       ...fullState,
-      drivers: nextDriversArray.map((d) => ({
-        ...d,
-        // Ensure fields needed by the rest of the system exist
-        canNight: !!d.canNight,
-        twoManOk: !!d.twoManOk,
-        weekAvailability: Array.isArray(d.weekAvailability)
-          ? d.weekAvailability
-          : [],
-        leaves: Array.isArray(d.leaves) ? d.leaves : [],
-      })),
+      drivers: nextDrivers,
     };
 
-    // Update UI immediately
-    setFullState(nextState);
-
-    // Send to backend to be saved
     try {
-      setSaving(true);
       await apiSaveState(nextState);
+      setFullState(nextState);
     } catch (err) {
-      console.error("Failed saving drivers schedule:", err);
-      // You could show toast or alert here
-      alert("Failed to save driver schedule on server.");
+      console.error("Failed to save drivers:", err);
+      setError("Failed to save drivers");
     } finally {
       setSaving(false);
     }
   }
 
-  // Protection: if user is not admin, return them
   if (!isAdmin) {
-    return <div className="p-4 text-sm text-gray-500">Admin only.</div>;
-  }
-
-  // If still loading state
-  if (loading || !fullState) {
     return (
-      <div className="p-6 text-gray-500 text-sm animate-pulse">
-        Loading driver settings...
+      <div className="p-4 text-sm text-gray-500">
+        You must be admin to view this page.
       </div>
     );
   }
 
-  // State is ready
+  if (loading) {
+    return <div className="p-4 text-sm text-gray-500">Loading…</div>;
+  }
+
   return (
-    <div className="min-h-screen bg-gray-50 py-6">
-      {/* Small banner at top if saving operation is in progress */}
-      {saving && (
-        <div className="max-w-4xl mx-auto mb-4 text-[13px] text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
-          Saving changes...
-        </div>
-      )}
+    <div className="p-4 space-y-4">
+      {saving && <div className="text-xs text-blue-600">Saving drivers…</div>}
+      {error && <div className="text-xs text-red-600">{error}</div>}
 
       <AdminDriverSchedule
-        drivers={fullState.drivers || []}
+        drivers={fullState?.drivers || []}
         onSaveDrivers={handleSaveDrivers}
       />
     </div>
