@@ -1,8 +1,8 @@
 // src/lib/api.js
 
 // Simple API client for the new backend
-export const BASE = (
-  import.meta.env.VITE_API_URL || "http://localhost:4000"
+const API_BASE = (
+  import.meta.env.VITE_API_URL || `${window.location.origin}/api`
 ).replace(/\/+$/, "");
 
 function getToken() {
