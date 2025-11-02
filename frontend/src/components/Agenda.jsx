@@ -1,25 +1,25 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Plus, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
+import { apiGetState, apiSaveState } from "../lib/api";
 
-// ===== Helpers =====
+/* ================= helpers ================= */
 
 // yyyy-mm-dd
 function ymd(dateObj) {
   return dateObj.toISOString().split("T")[0];
 }
 
-// بداية أسبوع (نعتبر الاثنين هو أول يوم)
+// بداية أسبوع (الاثنين أول يوم)
 function startOfWeek(d) {
   const date = new Date(d);
   const weekday = date.getDay(); // 0 = Sun
-  const diff = weekday === 0 ? -6 : 1 - weekday; // علشان الاثنين يبقى البداية
+  const diff = weekday === 0 ? -6 : 1 - weekday;
   date.setDate(date.getDate() + diff);
   date.setHours(0, 0, 0, 0);
   return date;
 }
 
-// array of 7 days for current week
 function getWeekDays(d) {
   const start = startOfWeek(d);
   return [...Array(7)].map((_, i) => {
@@ -29,7 +29,6 @@ function getWeekDays(d) {
   });
 }
 
-// month grid (6 أسابيع = 42 خانة) يبدأ من أول أسبوع يلمس الشهر
 function getMonthGrid(d) {
   const first = new Date(d.getFullYear(), d.getMonth(), 1);
   const firstWeekStart = startOfWeek(first);
@@ -40,11 +39,8 @@ function getMonthGrid(d) {
   });
 }
 
-// ===== Small visual helpers =====
-
 function eventColorClasses(etype) {
-  const isEmergency = etype === "emergency";
-  return isEmergency
+  return etype === "emergency"
     ? "bg-red-100 border-red-300 text-red-700"
     : "bg-blue-100 border-blue-300 text-blue-700";
 }
@@ -56,7 +52,7 @@ function EventPill({ ev, onClick }) {
         ev.type
       )} hover:opacity-80 transition-opacity`}
       onClick={(e) => {
-        e.stopPropagation(); // مهم عشان ما يغيرش اليوم لو كليك داخل cell
+        e.stopPropagation();
         onClick && onClick(ev);
       }}
     >
@@ -67,14 +63,14 @@ function EventPill({ ev, onClick }) {
   );
 }
 
-// ===== Add New Event Modal =====
-// مودال إضافة (create)
+/* ================= modals ================= */
+
 function NewEventModal({ onClose, onSave, defaultDay }) {
   const [title, setTitle] = useState("");
   const [day, setDay] = useState(defaultDay || ymd(new Date()));
   const [startTime, setStartTime] = useState("08:00");
   const [endTime, setEndTime] = useState("10:00");
-  const [etype, setEtype] = useState("normal"); // normal | emergency
+  const [etype, setEtype] = useState("normal");
   const [details, setDetails] = useState("");
 
   const handleSave = () => {
@@ -94,7 +90,6 @@ function NewEventModal({ onClose, onSave, defaultDay }) {
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 p-4">
       <div className="bg-white w-full max-w-sm rounded-xl shadow-xl border border-gray-200 flex flex-col max-h-[90vh]">
-        {/* Header */}
         <div className="p-4 border-b border-gray-200 flex items-center justify-between">
           <div className="text-base font-semibold text-gray-900">
             New Agenda Item
@@ -107,7 +102,6 @@ function NewEventModal({ onClose, onSave, defaultDay }) {
           </button>
         </div>
 
-        {/* Body */}
         <div className="p-4 text-sm space-y-4 overflow-y-auto">
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">
@@ -117,7 +111,6 @@ function NewEventModal({ onClose, onSave, defaultDay }) {
               className="input-field w-full"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Emergency Delivery / Meeting with client..."
             />
           </div>
 
@@ -181,12 +174,10 @@ function NewEventModal({ onClose, onSave, defaultDay }) {
               className="input-field w-full min-h-[80px]"
               value={details}
               onChange={(e) => setDetails(e.target.value)}
-              placeholder="Full instructions, addresses, contacts, etc..."
             />
           </div>
         </div>
 
-        {/* Footer */}
         <div className="p-4 border-t border-gray-200 flex justify-end">
           <button
             className="bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
@@ -200,9 +191,6 @@ function NewEventModal({ onClose, onSave, defaultDay }) {
   );
 }
 
-// ===== View / Edit Existing Event Modal =====
-// لو أدمن: يقدر يعدل و يحذف
-// لو مش أدمن: يقرأ فقط
 function EditEventModal({ ev, isAdmin, onClose, onUpdate, onDelete }) {
   const [title, setTitle] = useState(ev.title || "");
   const [day, setDay] = useState(ev.day || ymd(new Date()));
@@ -236,7 +224,6 @@ function EditEventModal({ ev, isAdmin, onClose, onUpdate, onDelete }) {
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 p-4">
       <div className="bg-white w-full max-w-md rounded-xl shadow-xl border border-gray-200 flex flex-col max-h-[90vh]">
-        {/* Header */}
         <div className="p-4 border-b border-gray-200 flex items-start justify-between">
           <div className="flex flex-col">
             <div className="text-base font-semibold text-gray-900">
@@ -271,9 +258,7 @@ function EditEventModal({ ev, isAdmin, onClose, onUpdate, onDelete }) {
           </div>
         </div>
 
-        {/* Body */}
         <div className="p-4 text-sm space-y-4 overflow-y-auto">
-          {/* Title */}
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">
               Title
@@ -288,7 +273,6 @@ function EditEventModal({ ev, isAdmin, onClose, onUpdate, onDelete }) {
             />
           </div>
 
-          {/* Day + Type */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">
@@ -322,7 +306,6 @@ function EditEventModal({ ev, isAdmin, onClose, onUpdate, onDelete }) {
             </div>
           </div>
 
-          {/* Times */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">
@@ -354,7 +337,6 @@ function EditEventModal({ ev, isAdmin, onClose, onUpdate, onDelete }) {
             </div>
           </div>
 
-          {/* Details */}
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">
               Details / Notes
@@ -366,12 +348,10 @@ function EditEventModal({ ev, isAdmin, onClose, onUpdate, onDelete }) {
               disabled={!isAdmin}
               value={details}
               onChange={(e) => setDetails(e.target.value)}
-              placeholder="Full content, long notes, addresses, instructions, etc..."
             />
           </div>
         </div>
 
-        {/* Footer */}
         <div className="p-4 border-t border-gray-200 flex justify-end gap-2">
           {isAdmin && (
             <button
@@ -381,7 +361,6 @@ function EditEventModal({ ev, isAdmin, onClose, onUpdate, onDelete }) {
               Save changes
             </button>
           )}
-
           <button
             className="text-gray-600 text-sm border border-gray-300 rounded-lg px-4 py-2 hover:bg-gray-100"
             onClick={onClose}
@@ -394,7 +373,8 @@ function EditEventModal({ ev, isAdmin, onClose, onUpdate, onDelete }) {
   );
 }
 
-// ===== Month View =====
+/* ================= views ================= */
+
 function MonthView({ currentDate, eventsByDay, onSelectDay, onSelectEvent }) {
   const days = getMonthGrid(currentDate);
   const month = currentDate.getMonth();
@@ -414,11 +394,7 @@ function MonthView({ currentDate, eventsByDay, onSelectDay, onSelectEvent }) {
             onClick={() => onSelectDay(d)}
           >
             <div className="text-[11px] font-semibold mb-1 flex items-center justify-between">
-              <span>
-                {d.toLocaleDateString("en-US", {
-                  day: "numeric",
-                })}
-              </span>
+              <span>{d.toLocaleDateString("en-US", { day: "numeric" })}</span>
             </div>
 
             <div className="space-y-1">
@@ -442,10 +418,8 @@ function MonthView({ currentDate, eventsByDay, onSelectDay, onSelectEvent }) {
   );
 }
 
-// ===== Week View =====
 function WeekView({ currentDate, eventsByDay, onSelectDay, onSelectEvent }) {
   const weekDays = getWeekDays(currentDate);
-
   return (
     <div
       className="grid gap-2"
@@ -469,7 +443,6 @@ function WeekView({ currentDate, eventsByDay, onSelectDay, onSelectEvent }) {
                 day: "numeric",
               })}
             </div>
-
             <div className="mt-2 space-y-2">
               {dayEvents.map((ev) => (
                 <EventPill
@@ -486,12 +459,8 @@ function WeekView({ currentDate, eventsByDay, onSelectDay, onSelectEvent }) {
   );
 }
 
-// ===== Day View =====
 function DayView({ currentDate, dayEvents, onSelectEvent }) {
-  // sort by start
   const sorted = [...dayEvents].sort((a, b) => a.start.localeCompare(b.start));
-
-  // خطوط الساعات (دي بس شكل بصري زي screenshot)
   const hours = [
     "08:00",
     "09:00",
@@ -517,7 +486,6 @@ function DayView({ currentDate, dayEvents, onSelectEvent }) {
       </div>
 
       <div className="p-4 text-sm relative">
-        {/* خطوط التايملاين */}
         <div className="space-y-6 relative">
           {hours.map((h, i) => (
             <div key={i} className="relative pl-16">
@@ -529,21 +497,15 @@ function DayView({ currentDate, dayEvents, onSelectEvent }) {
           ))}
         </div>
 
-        {/* اللييرات اللي فوق الخطوط */}
         <div className="absolute inset-0 pointer-events-none">
           {sorted.map((ev, idx) => (
             <div
               key={ev.id}
               className="absolute left-[5rem] right-4"
-              style={{
-                top: `${idx * 60 + 10}px`, // توزيع بسيط عمودي
-              }}
+              style={{ top: `${idx * 60 + 10}px` }}
             >
               <div className="pointer-events-auto">
-                <EventPill
-                  ev={ev}
-                  onClick={(eventObj) => onSelectEvent(eventObj)}
-                />
+                <EventPill ev={ev} onClick={(e) => onSelectEvent(e)} />
               </div>
             </div>
           ))}
@@ -559,113 +521,129 @@ function DayView({ currentDate, dayEvents, onSelectEvent }) {
   );
 }
 
-// ===== Main Agenda Component =====
+/* ================= main component ================= */
+
 export default function Agenda() {
-  // معرفة صلاحيات الأدمن
   const { user } = useAuth() || { user: null };
-  const isAdmin = user?.role === "ADMIN";
+  const isAdmin = user?.role === "admin";
 
-  // الحالة (ممكن بعدين نحفظها في الـ backend كجزء من FleetState أو موديل AgendaEvent)
-  const [events, setEvents] = useState([
-    {
-      id: "1",
-      title: "FaceTime with grandma",
-      day: ymd(new Date()),
-      start: "08:30",
-      end: "09:30",
-      type: "normal",
-      details: "Quick catch-up.",
-    },
-    {
-      id: "2",
-      title: "Emergency delivery - TRK-203",
-      day: ymd(new Date()),
-      start: "10:00",
-      end: "11:00",
-      type: "emergency",
-      details:
-        "High priority load to DHL Hub. Must be delivered before noon. Driver: Marius.",
-    },
-  ]);
+  const [loading, setLoading] = useState(true);
+  const [baseState, setBaseState] = useState(null); // اللي جاي من /state كله
+  const [events, setEvents] = useState([]); // agenda فقط
 
-  const [viewMode, setViewMode] = useState("month"); // "day" | "week" | "month"
+  const [viewMode, setViewMode] = useState("month");
   const [currentDate, setCurrentDate] = useState(new Date());
-
   const [showNewModal, setShowNewModal] = useState(false);
-  const [activeEvent, setActiveEvent] = useState(null); // ev object for edit/view modal
+  const [activeEvent, setActiveEvent] = useState(null);
 
-  // build index by day
+  // أول ما تفتح الصفحة هات /state
+  useEffect(() => {
+    (async () => {
+      try {
+        const st = await apiGetState();
+        // لو السيرفر ما عندوش agenda هرجع مصفوفة فاضية
+        const agenda = Array.isArray(st.agenda) ? st.agenda : [];
+        setBaseState(st);
+        setEvents(
+          agenda.map((ev) => ({
+            // تأكد إن فيه id
+            id: ev.id || crypto.randomUUID(),
+            title: ev.title || "",
+            day: ev.day || ymd(new Date()),
+            start: ev.start || "08:00",
+            end: ev.end || "10:00",
+            type: ev.type || "normal",
+            details: ev.details || "",
+          }))
+        );
+      } catch (e) {
+        console.error("failed to load agenda from /state", e);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  // دالة واحدة تحفظ أي تغيير
+  async function persistAgenda(nextEvents) {
+    setEvents(nextEvents);
+    if (!isAdmin) return; // read-only للموظفين
+    if (!baseState) return;
+
+    const nextState = {
+      ...baseState,
+      // هنا أهم سطر 👇
+      agenda: nextEvents,
+    };
+
+    try {
+      const saved = await apiSaveState(nextState);
+      // علشان لو الباك رجّع نسخة محدثة
+      setBaseState(saved);
+    } catch (e) {
+      console.error("failed to save agenda", e);
+    }
+  }
+
+  // index by day
   const eventsByDay = events.reduce((acc, ev) => {
     acc[ev.day] = acc[ev.day] || [];
     acc[ev.day].push(ev);
     return acc;
   }, {});
-
   const currentDayKey = ymd(currentDate);
   const todayEvents = eventsByDay[currentDayKey] || [];
 
-  // التنقل بين الأيام / الأسابيع / الشهور
+  // nav
   const goPrev = () => {
     const d = new Date(currentDate);
-    if (viewMode === "day") {
-      d.setDate(d.getDate() - 1);
-    } else if (viewMode === "week") {
-      d.setDate(d.getDate() - 7);
-    } else {
-      d.setMonth(d.getMonth() - 1);
-    }
+    if (viewMode === "day") d.setDate(d.getDate() - 1);
+    else if (viewMode === "week") d.setDate(d.getDate() - 7);
+    else d.setMonth(d.getMonth() - 1);
     setCurrentDate(d);
   };
-
   const goNext = () => {
     const d = new Date(currentDate);
-    if (viewMode === "day") {
-      d.setDate(d.getDate() + 1);
-    } else if (viewMode === "week") {
-      d.setDate(d.getDate() + 7);
-    } else {
-      d.setMonth(d.getMonth() + 1);
-    }
+    if (viewMode === "day") d.setDate(d.getDate() + 1);
+    else if (viewMode === "week") d.setDate(d.getDate() + 7);
+    else d.setMonth(d.getMonth() + 1);
     setCurrentDate(d);
   };
+  const goToday = () => setCurrentDate(new Date());
 
-  const goToday = () => {
-    setCurrentDate(new Date());
-  };
-
-  // لما المستخدم يختار يوم من month/week
   const onSelectDay = (d) => {
     setCurrentDate(d);
     setViewMode("day");
   };
 
-  // إضافة إيفنت جديد
   const addNewEvent = (ev) => {
-    setEvents((prev) => [...prev, ev]);
+    const next = [...events, ev];
+    persistAgenda(next);
   };
 
-  // لما يدوس على EventPill -> افتح مودال العرض/التعديل
-  const onSelectEvent = (ev) => {
-    setActiveEvent(ev);
-  };
+  const onSelectEvent = (ev) => setActiveEvent(ev);
 
-  // حفظ تعديل من المودال
   const updateEvent = (updatedEv) => {
-    setEvents((prev) =>
-      prev.map((e) => (e.id === updatedEv.id ? updatedEv : e))
-    );
+    const next = events.map((e) => (e.id === updatedEv.id ? updatedEv : e));
+    persistAgenda(next);
   };
 
-  // مسح إيفنت من المودال
   const deleteEvent = (id) => {
-    setEvents((prev) => prev.filter((e) => e.id !== id));
+    const next = events.filter((e) => e.id !== id);
+    persistAgenda(next);
   };
+
+  if (loading) {
+    return (
+      <div className="p-6 text-sm text-gray-500">
+        Loading agenda from server...
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 max-w-[1800px] mx-auto">
-      {/* Header bar */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
-        {/* Left side: date nav + info */}
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
             <button
@@ -707,7 +685,6 @@ export default function Agenda() {
           </div>
         </div>
 
-        {/* Right side: View switch + New */}
         <div className="flex items-center gap-2">
           {["day", "week", "month"].map((mode) => (
             <button
@@ -735,7 +712,6 @@ export default function Agenda() {
         </div>
       </div>
 
-      {/* Body view */}
       <div className="text-sm">
         {viewMode === "month" && (
           <MonthView
@@ -745,7 +721,6 @@ export default function Agenda() {
             onSelectEvent={onSelectEvent}
           />
         )}
-
         {viewMode === "week" && (
           <WeekView
             currentDate={currentDate}
@@ -754,7 +729,6 @@ export default function Agenda() {
             onSelectEvent={onSelectEvent}
           />
         )}
-
         {viewMode === "day" && (
           <DayView
             currentDate={currentDate}
@@ -764,7 +738,6 @@ export default function Agenda() {
         )}
       </div>
 
-      {/* Modal: إنشاء عنصر جديد */}
       {showNewModal && (
         <NewEventModal
           onClose={() => setShowNewModal(false)}
@@ -773,7 +746,6 @@ export default function Agenda() {
         />
       )}
 
-      {/* Modal: عرض/تعديل/حذف عنصر موجود */}
       {activeEvent && (
         <EditEventModal
           ev={activeEvent}

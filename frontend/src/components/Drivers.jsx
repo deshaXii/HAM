@@ -7,7 +7,7 @@ import AdminDriverSchedule from "./AdminDriverSchedule";
 
 export default function AdminDriversPage() {
   const { user } = useAuth();
-  const isAdmin = user?.role === "ADMIN";
+  const isAdmin = user?.role === "admin";
 
   // If not logged in at all
   if (!user) {

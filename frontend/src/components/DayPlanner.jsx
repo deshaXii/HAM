@@ -53,32 +53,69 @@ function startTimeFromSlotKey(slotKey) {
   return map[slotKey] || "08:00";
 }
 
-/* مهم: نطبع الجوب من الـ API بحيث لو الـ backend راجع null في tractorId/trailerId
-   نخليه في الـ UI = "" عشان الـ forms تشتغل عادي */
-function normalizeJobFromApi(job) {
+/* ==== resolve legacy short IDs → real UUIDs ==== */
+function resolveResourceId(maybeId, list) {
+  if (!maybeId) return "";
+  if (!Array.isArray(list)) return maybeId;
+
+  // exact
+  const exact = list.find((r) => r.id === maybeId);
+  if (exact) return maybeId;
+
+  // legacy prefix (old short ids)
+  const byPrefix = list.find(
+    (r) => typeof r.id === "string" && r.id.startsWith(String(maybeId))
+  );
+  if (byPrefix) return byPrefix.id;
+
+  // match by code
+  const byCode = list.find((r) => r.code && r.code === maybeId);
+  if (byCode) return byCode.id;
+
+  return maybeId;
+}
+
+/* normalize job from API */
+function normalizeJobFromApi(job, drivers = [], tractors = [], trailers = []) {
   const hour = parseInt((job.start || "0").split(":")[0], 10);
   const normalizedSlot = job.slot
     ? job.slot
     : hour >= 20 || hour < 8
     ? "night"
     : "day";
+
+  const fixedTractorId = resolveResourceId(job.tractorId ?? "", tractors);
+  const fixedTrailerId = resolveResourceId(job.trailerId ?? "", trailers);
+  const fixedDriverIds = Array.isArray(job.driverIds)
+    ? job.driverIds.map((id) => resolveResourceId(id, drivers))
+    : [];
+
   return {
     ...job,
     slot: normalizedSlot,
-    tractorId: job.tractorId ?? "",
-    trailerId: job.trailerId ?? "",
+    tractorId: fixedTractorId ?? "",
+    trailerId: fixedTrailerId ?? "",
+    driverIds: fixedDriverIds,
   };
 }
 
 function normalizeStateFromApi(apiState) {
   if (!apiState || !Array.isArray(apiState.jobs)) return apiState;
+
+  const drivers = Array.isArray(apiState.drivers) ? apiState.drivers : [];
+  const tractors = Array.isArray(apiState.tractors) ? apiState.tractors : [];
+  const trailers = Array.isArray(apiState.trailers) ? apiState.trailers : [];
+  const locations = Array.isArray(apiState.locations) ? apiState.locations : [];
+
   return {
     ...apiState,
-    jobs: apiState.jobs.map(normalizeJobFromApi),
-    drivers: Array.isArray(apiState.drivers) ? apiState.drivers : [],
-    tractors: Array.isArray(apiState.tractors) ? apiState.tractors : [],
-    trailers: Array.isArray(apiState.trailers) ? apiState.trailers : [],
-    locations: Array.isArray(apiState.locations) ? apiState.locations : [],
+    jobs: apiState.jobs.map((job) =>
+      normalizeJobFromApi(job, drivers, tractors, trailers)
+    ),
+    drivers,
+    tractors,
+    trailers,
+    locations,
   };
 }
 
@@ -123,7 +160,7 @@ function normalizeWeekAvailability(wa) {
 function driverWorksOnDay(driver, isoDate) {
   const list = normalizeWeekAvailability(driver?.weekAvailability);
   if (!list || list.length === 0) return true;
-  const weekdayJs = new Date(isoDate).getDay(); // 0..6
+  const weekdayJs = new Date(isoDate).getDay();
   return list.includes(weekdayJs);
 }
 
@@ -275,7 +312,7 @@ function validateWholeJob(state, candidateJob, originalJobId) {
   return { ok: true };
 }
 
-/* ========== NEW: normalize before sending to backend ========== */
+/* ========== normalize before sending to backend ========== */
 function toBackendLocation(val) {
   if (!val) return "";
   if (typeof val === "string") return val;
@@ -286,21 +323,14 @@ function normalizeStateForBackend(state) {
   const normJobs = (state.jobs || []).map((job) => {
     const j = { ...job };
 
-    // pickup / dropoff → String
     j.pickup = toBackendLocation(j.pickup);
     j.dropoff = toBackendLocation(j.dropoff);
 
-    // tractorId / trailerId → رقم أو null
     if (j.tractorId === "" || j.tractorId === undefined) {
       j.tractorId = null;
-    } else if (!Number.isNaN(Number(j.tractorId))) {
-      j.tractorId = Number(j.tractorId);
     }
-
     if (j.trailerId === "" || j.trailerId === undefined) {
       j.trailerId = null;
-    } else if (!Number.isNaN(Number(j.trailerId))) {
-      j.trailerId = Number(j.trailerId);
     }
 
     return j;
@@ -318,9 +348,9 @@ function normalizeStateForBackend(state) {
 
 /* ===== component ===== */
 export default function DayPlanner() {
-  const { date } = useParams(); // yyyy-mm-dd
+  const { date } = useParams();
   const { user } = useAuth();
-  const isAdmin = user?.role === "ADMIN";
+  const isAdmin = user?.role === "admin";
 
   if (!user) {
     return <Navigate to="/login" replace />;
@@ -355,9 +385,7 @@ export default function DayPlanner() {
   }, [date]);
 
   async function persistIfAdmin(nextState) {
-    // أول حاجة حدّث الـ UI
     setState(nextState);
-    // بعدين لو Admin إبعت نسخة متظبطة للباك
     if (isAdmin) {
       setSaving(true);
       try {
@@ -379,10 +407,13 @@ export default function DayPlanner() {
     const oldJob = state.jobs.find((j) => j.id === jobId);
     if (!oldJob) return;
 
-    // نطبّق الابديت
-    const candidate = normalizeJobFromApi({ ...oldJob, ...updates });
+    const candidate = normalizeJobFromApi(
+      { ...oldJob, ...updates },
+      state.drivers,
+      state.tractors,
+      state.trailers
+    );
 
-    // validation
     const check = validateWholeJob(state, candidate, jobId);
     if (!check.ok) {
       alert(check.reason);
@@ -411,7 +442,6 @@ export default function DayPlanner() {
       start: startTimeFromSlotKey(slotKey),
       slot: inferWeekSlotFromSlotKey(slotKey),
       client: "New Client",
-      // مهم: نبعتهم Strings عشان الـ prisma
       pickup: "",
       dropoff: "",
       durationHours: slotDurationHours(slotKey),
@@ -448,11 +478,35 @@ export default function DayPlanner() {
     const overIdStr = String(over.id);
     const isResource = activeIdStr.startsWith("resource-");
 
+    // helper to parse resource id safely (no split on "-")
+    const getResourceInfo = (idStr) => {
+      if (idStr.startsWith("resource-driver-")) {
+        return {
+          type: "driver",
+          id: idStr.slice("resource-driver-".length),
+        };
+      }
+      if (idStr.startsWith("resource-tractor-")) {
+        return {
+          type: "tractor",
+          id: idStr.slice("resource-tractor-".length),
+        };
+      }
+      if (idStr.startsWith("resource-trailer-")) {
+        return {
+          type: "trailer",
+          id: idStr.slice("resource-trailer-".length),
+        };
+      }
+      return { type: null, id: null };
+    };
+
     // drop on existing job
     if (isResource && overIdStr.startsWith("job-")) {
-      const [, resourceType, resourceRealId] = activeIdStr.split("-");
+      const { type: resourceType, id: resourceRealId } =
+        getResourceInfo(activeIdStr);
       const job = getJobById(overIdStr);
-      if (!job) return;
+      if (!job || !resourceType || !resourceRealId) return;
 
       let candidate = { ...job };
 
@@ -496,7 +550,9 @@ export default function DayPlanner() {
     // drop on empty slot → create job
     if (isResource && overIdStr.startsWith("time|")) {
       const [, dropDate, slotKey] = overIdStr.split("|");
-      const [, resourceType, resourceRealId] = activeIdStr.split("-");
+      const { type: resourceType, id: resourceRealId } =
+        getResourceInfo(activeIdStr);
+      if (!resourceType || !resourceRealId) return;
 
       let baseJob = {
         id: `job-${crypto.randomUUID()}`,
@@ -504,7 +560,6 @@ export default function DayPlanner() {
         start: startTimeFromSlotKey(slotKey),
         slot: inferWeekSlotFromSlotKey(slotKey),
         client: "New Client",
-        // مهم جدا هنا
         pickup: "",
         dropoff: "",
         durationHours: slotDurationHours(slotKey),
@@ -561,7 +616,6 @@ export default function DayPlanner() {
 
   return (
     <div className="min-h-screen bg-gray-50 relative">
-      {/* LOADING OVERLAY (save) */}
       {saving && (
         <div className="fixed inset-0 z-[999] bg-white/60 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
           <div className="w-10 h-10 rounded-full border-2 border-blue-500 border-t-transparent animate-spin"></div>
@@ -572,7 +626,6 @@ export default function DayPlanner() {
         </div>
       )}
 
-      {/* HEADER */}
       <div className="bg-white border-b border-gray-200 sticky top-0 z-10">
         <div className="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
@@ -600,7 +653,6 @@ export default function DayPlanner() {
         </div>
       </div>
 
-      {/* BODY */}
       <DndContext
         sensors={sensors}
         collisionDetection={pointerWithin}
@@ -645,7 +697,6 @@ export default function DayPlanner() {
                   type="trailer"
                   jobs={state.jobs}
                 />
-                {/* السواقين */}
                 <ResourcePool
                   title="Drivers"
                   icon={Users}

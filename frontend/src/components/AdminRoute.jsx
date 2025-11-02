@@ -19,7 +19,7 @@ export default function AdminRoute({ children }) {
   }
 
   // لوجين بس مش أدمن؟ خليه يروح للـ Planner
-  if (user.role !== "ADMIN") {
+  if (user.role !== "admin") {
     return <Navigate to="/plan" replace />;
   }
 

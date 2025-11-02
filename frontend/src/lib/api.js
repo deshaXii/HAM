@@ -88,14 +88,20 @@ export async function apiListUsers() {
   if (!r.ok) throw new Error(j.error || "Failed to list users");
   return j;
 }
+
+// ❗ الباك إند بتاعك على /users/:id/admin طالب role مش isAdmin
 export async function apiSetUserAdmin(userId, isAdmin) {
+  const wantedRole = isAdmin ? "admin" : "user";
   const r = await fetch(`${BASE}/users/${userId}/admin`, {
     method: "PATCH",
     headers: authHeaders(),
-    body: JSON.stringify({ isAdmin }),
+    body: JSON.stringify({ role: wantedRole }),
   });
-  const j = await r.json();
-  if (!r.ok) throw new Error(j.error || "Failed to update role");
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    // هتلاقي هنا الرسالة اللي انت شوفتها: { message: "role required" }
+    throw new Error(j.error || j.message || "Failed to update role");
+  }
   return j;
 }
 

@@ -5,28 +5,33 @@ import { useAuth } from "../contexts/AuthContext";
 export default function Profile() {
   const { user } = useAuth();
 
-  const [tasks, setTasks] = useState([]); // [{id, title, items: [{id,text,done,comment}, ...]}, ...]
+  const [tasks, setTasks] = useState([]); // [{id, title, items: [...]}, ...]
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
-  // drafts = نسخة editable محلية لكل item
-  // drafts[itemId] = { done: boolean, comment: string }
+  // drafts[itemId] = { done, comment }
   const [drafts, setDrafts] = useState({});
 
-  // تحميل التاسكات + ملاحظة الأدمن أول مرة
   useEffect(() => {
     (async () => {
       try {
-        const [t, n] = await Promise.all([apiMyTasks(), apiGetNotice()]);
+        const [myTasksRes, noticeRes] = await Promise.all([
+          apiMyTasks(), // بيرجع { tasks: [...] }
+          apiGetNotice(),
+        ]);
 
-        setTasks(t || []);
-        setNotice(n?.content || "");
+        const myTasks = Array.isArray(myTasksRes?.tasks)
+          ? myTasksRes.tasks
+          : [];
 
-        // حضّر نسخة editable للـdrafts من الداتا اللي جاية من السيرفر
+        setTasks(myTasks);
+        setNotice(noticeRes?.content || "");
+
+        // حضّر الـ drafts من الداتا
         const initDrafts = {};
-        (t || []).forEach((task) => {
-          task.items.forEach((it) => {
+        myTasks.forEach((task) => {
+          (task.items || []).forEach((it) => {
             initDrafts[it.id] = {
               done: !!it.done,
               comment: it.comment || "",
@@ -42,7 +47,6 @@ export default function Profile() {
     })();
   }, []);
 
-  // تحديث الـcheckbox محلي فقط
   const toggleDoneLocal = (itemId) => {
     setDrafts((prev) => ({
       ...prev,
@@ -53,7 +57,6 @@ export default function Profile() {
     }));
   };
 
-  // تحديث الـcomment محلي فقط أثناء الكتابة
   const updateCommentLocal = (itemId, val) => {
     setDrafts((prev) => ({
       ...prev,
@@ -64,32 +67,26 @@ export default function Profile() {
     }));
   };
 
-  // حفظ بند واحد في الـ backend ثم مزامنة الـtasks في الواجهة
   const saveItem = async (taskId, itemId) => {
     const draft = drafts[itemId];
     if (!draft) return;
 
-    // ابعت التغييرات للسيرفر
     const updatedFromServer = await apiUpdateTaskItem(itemId, {
       done: draft.done,
       comment: draft.comment,
     });
 
-    // عكس التعديل في tasks (عشان اللي ظاهر للمستخدم يبقى synced)
     setTasks((prevTasks) =>
       prevTasks.map((task) => {
         if (task.id !== taskId) return task;
         return {
           ...task,
-          items: task.items.map((it) =>
+          items: (task.items || []).map((it) =>
             it.id === itemId ? { ...it, ...updatedFromServer } : it
           ),
         };
       })
     );
-
-    // مافيش داعي نعدل drafts تاني لأن قيمة drafts أصلاً هي اللي بعتناها
-    // ولو السيرفر رجّع حاجة مختلفة، سبتّها انعكست فوق في tasks (الجزء اللي بيبان read-only زي text)
   };
 
   if (loading) {
@@ -102,7 +99,7 @@ export default function Profile() {
 
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-8">
-      {/* معلومات الحساب */}
+      {/* account info */}
       <section className="bg-white shadow rounded-xl border border-gray-200 p-6">
         <h1 className="text-lg font-semibold text-gray-900 mb-4">My Profile</h1>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm text-gray-800">
@@ -121,7 +118,7 @@ export default function Profile() {
         </div>
       </section>
 
-      {/* ملاحظات الأدمن (الدفتر العام) */}
+      {/* admin notice */}
       {notice?.trim() && (
         <section className="bg-white shadow rounded-xl border border-yellow-200 p-6 bg-yellow-50/50">
           <h2 className="text-lg font-semibold text-gray-900 mb-3">
@@ -133,8 +130,8 @@ export default function Profile() {
         </section>
       )}
 
-      {/* المهام المطلوبة */}
-      {user.role !== "ADMIN" && (
+      {/* tasks for non-admin */}
+      {user?.role !== "admin" && (
         <section className="bg-white shadow rounded-xl border border-gray-200 p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">
             Required Tasks
@@ -151,14 +148,12 @@ export default function Profile() {
                   key={task.id}
                   className="bg-gray-50 border border-gray-300 rounded-lg p-4"
                 >
-                  {/* عنوان المهمة */}
                   <div className="font-medium text-gray-900 text-base mb-4">
                     {task.title}
                   </div>
 
-                  {/* البنود */}
                   <div className="space-y-4 text-sm">
-                    {task.items.map((item) => {
+                    {(task.items || []).map((item) => {
                       const d = drafts[item.id] || {
                         done: !!item.done,
                         comment: item.comment || "",
@@ -169,7 +164,6 @@ export default function Profile() {
                           key={item.id}
                           className="bg-white border border-gray-200 rounded-lg p-4"
                         >
-                          {/* السطر العلوي: checkbox + نص البند */}
                           <div className="flex items-start gap-3">
                             <input
                               type="checkbox"
@@ -189,11 +183,10 @@ export default function Profile() {
                                 {item.text}
                               </div>
 
-                              {/* ملاحظتي / الرد بتاعي */}
                               <div className="mt-3">
                                 <textarea
                                   className="input-field w-full min-h-[120px] text-sm leading-relaxed"
-                                  placeholder="اكتب ملاحظتك: خلصت ايه / ايه اللي واقف / لو حاجة ما اتعملتش ليه..."
+                                  placeholder="اكتب ملاحظتك..."
                                   value={d.comment}
                                   onChange={(e) =>
                                     updateCommentLocal(item.id, e.target.value)
@@ -201,7 +194,6 @@ export default function Profile() {
                                 />
                               </div>
 
-                              {/* زرار حفظ */}
                               <div className="mt-3 flex justify-end">
                                 <button
                                   onClick={() => saveItem(task.id, item.id)}

@@ -116,13 +116,13 @@ function AdminRolePanel() {
     loadUsers();
   }, []);
 
-  const adminCount = users.filter((u) => u.role === "ADMIN").length;
+  const adminCount = users.filter((u) => u.role === "admin").length;
 
   async function toggleAdmin(u, checked) {
     setBusyId(u.id);
     setErr("");
     try {
-      if (!checked && u.role === "ADMIN" && adminCount <= 1) {
+      if (!checked && u.role === "admin" && adminCount <= 1) {
         alert("Cannot remove permissions from the last admin in the system.");
         return;
       }
@@ -177,7 +177,7 @@ function AdminRolePanel() {
     if (currentUser?.id === u.id) {
       return alert("You cannot delete yourself.");
     }
-    if (u.role === "ADMIN" && adminCount <= 1) {
+    if (u.role === "admin" && adminCount <= 1) {
       return alert("Cannot delete the last admin in the system.");
     }
     if (
@@ -240,7 +240,7 @@ function AdminRolePanel() {
             ) : (
               users.map((u) => {
                 const isEditing = !!edit[u.id];
-                const isAdmin = u.role === "ADMIN";
+                const isAdmin = u.role === "admin";
                 const isSelf = currentUser && currentUser.id === u.id;
 
                 return (

@@ -95,16 +95,13 @@ function normalizeLocations(raw) {
 function buildSafeState(raw) {
   const src = raw || {};
   const jobs = Array.isArray(src.jobs) ? src.jobs.map(normalizeJobSlot) : [];
+
+  // ما نحولش tractorId لأرقام.. سيبه زي ما جاي (string/GUID)
   const jobsWithNormalizedIds = jobs.map((j) => ({
     ...j,
-    tractorId:
-      j.tractorId !== null &&
-      j.tractorId !== undefined &&
-      j.tractorId !== "" &&
-      !Number.isNaN(Number(j.tractorId))
-        ? Number(j.tractorId)
-        : "",
+    tractorId: j.tractorId ?? "", // لو undefined خليه ""
   }));
+
   const normalizedLocations = normalizeLocations(src.locations);
   return {
     jobs: jobsWithNormalizedIds,
@@ -313,7 +310,7 @@ function getStartOfWeek(date) {
 
 export default function Planner() {
   const { user } = useAuth();
-  const isAdmin = user?.role === "ADMIN";
+  const isAdmin = user?.role === "admin";
 
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);

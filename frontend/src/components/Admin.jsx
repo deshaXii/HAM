@@ -225,7 +225,7 @@ export default function Admin() {
 
   const handleSaveChanges = async () => {
     try {
-      if (user?.role !== "ADMIN") {
+      if (user?.role !== "admin") {
         alert("Only admin can save.");
         return;
       }
@@ -341,12 +341,12 @@ export default function Admin() {
             <button
               onClick={handleSaveChanges}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
-                user?.role === "ADMIN"
+                user?.role === "admin"
                   ? "bg-orange-600 text-white hover:bg-orange-700"
                   : "bg-gray-300 text-gray-600 cursor-not-allowed"
               }`}
               title={
-                user?.role === "ADMIN"
+                user?.role === "admin"
                   ? "Write draft to database"
                   : "Only admin can save"
               }

@@ -32,7 +32,7 @@ function initialsOf(name) {
 
 export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
   const { user } = useAuth();
-  const isAdmin = user?.role === "ADMIN";
+  const isAdmin = user?.role === "admin";
 
   const [local, setLocal] = useState(
     (drivers || []).map((d) => ({

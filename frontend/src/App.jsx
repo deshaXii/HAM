@@ -82,7 +82,7 @@ function Navigation() {
                 const Icon = item.icon;
                 const isActive = location.pathname === item.path;
                 // ADMIN يشوف كله
-                if (user.role === "ADMIN") {
+                if (user.role === "admin") {
                   return (
                     <Link
                       key={item.path}

@@ -81,7 +81,7 @@ function buildDistanceMatrixFromLocations(locations) {
 
 export default function LocationsMap() {
   const { user } = useAuth();
-  const isAdmin = user?.role === "ADMIN";
+  const isAdmin = user?.role === "admin";
 
   const [loading, setLoading] = useState(true);
   const [state, setState] = useState(null);
