@@ -74,7 +74,7 @@ function Navigation() {
           <div className="flex items-center gap-8">
             <div className="flex items-center gap-3">
               <img
-                src="./logo.png"
+                src="./src/logo.png"
                 alt="logo"
                 className="h-8 w-8 text-blue-600"
               />
