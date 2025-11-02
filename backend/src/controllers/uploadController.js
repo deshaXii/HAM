@@ -5,9 +5,9 @@ async function uploadDriverPhoto(req, res) {
   if (!req.file) {
     return res.status(400).json({ message: "No file uploaded" });
   }
-  const base =
-    process.env.BASE_URL || `http://localhost:${process.env.PORT || 4000}`;
-  const url = base + "/uploads/" + req.file.filename;
+  const base = process.env.BASE_URL || `https://hamtransport.cloud`;
+  const url = base.replace(/\/+$/, "") + "/uploads/" + req.file.filename;
+
   // مش هنخزنها في DB هنا، الفرونت اصلاً بيستخدمها مباشرة
   return res.json({ url });
 }

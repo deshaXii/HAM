@@ -73,8 +73,12 @@ function Navigation() {
           {/* left */}
           <div className="flex items-center gap-8">
             <div className="flex items-center gap-3">
-              <Truck className="h-8 w-8 text-blue-600" />
-              <h1 className="text-xl font-bold text-gray-900">Fleet Planner</h1>
+              <img
+                src="./logo.png"
+                alt="logo"
+                className="h-8 w-8 text-blue-600"
+              />
+              <h1 className="text-xl font-bold text-gray-900">Planner</h1>
             </div>
 
             <div className="flex gap-1">

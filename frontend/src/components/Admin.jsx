@@ -22,7 +22,7 @@ const defaultState = {
   tractors: [],
   trailers: [],
   jobs: [],
-  weekStart: "2025-10-16",
+  weekStart: "2025-11-02",
   locations: [
     "Depot-Hoofddorp",
     "AH-Zaandam",
