@@ -4,10 +4,51 @@ import { useDroppable } from "@dnd-kit/core";
 import { Plus, AlertTriangle } from "lucide-react";
 import { Link } from "react-router-dom";
 
+const STATUS_COLORS = {
+  incomplete: "bg-gray-400",
+  waiting: "bg-yellow-400",
+  processed_soon: "bg-orange-500",
+  processed: "bg-blue-500",
+  complete: "bg-green-600",
+};
+function computeJobStatus(job) {
+  if (
+    !job ||
+    !job.date ||
+    !job.start ||
+    !job.durationHours ||
+    !job.pickup ||
+    !job.dropoff ||
+    !Array.isArray(job.driverIds) ||
+    job.driverIds.length === 0 ||
+    !job.tractorId
+  ) {
+    return "incomplete";
+  }
+  const start = new Date(`${job.date}T${job.start}:00`);
+  const end = new Date(
+    start.getTime() + (Number(job.durationHours) || 0) * 3600 * 1000
+  );
+  const now = new Date();
+  if (now >= end) return "complete";
+  if (now >= start && now < end) return "processed";
+  const oneHourBefore = new Date(start.getTime() - 60 * 60 * 1000);
+  if (now >= oneHourBefore && now < start) return "processed_soon";
+  return "waiting";
+}
 function formatDateLocal(date) {
   return date.toLocaleDateString("en-CA");
 }
 
+function startOfWeekMonday(dateISO) {
+  const d = new Date(dateISO);
+  d.setHours(0, 0, 0, 0);
+  const day = d.getDay(); // 0 Sun ... 6 Sat
+  const diff = day === 0 ? -6 : 1 - day; // shift so Monday is start
+  const monday = new Date(d);
+  monday.setDate(d.getDate() + diff);
+  return monday.toISOString().slice(0, 10);
+}
 function getWeekDays(weekStartISO) {
   const base = new Date(weekStartISO);
   base.setHours(0, 0, 0, 0);
@@ -135,6 +176,26 @@ function JobCard({
   );
 }
 
+function StatusLegend() {
+  const items = [
+    ["incomplete", "Missing data"],
+    ["waiting", "Waiting"],
+    ["processed_soon", "Starting in <1h"],
+    ["processed", "In progress"],
+    ["complete", "Complete"],
+  ];
+  return (
+    <div className="flex flex-wrap gap-2 text-[10px] text-gray-600">
+      {items.map(([k, label]) => (
+        <span key={k} className="inline-flex items-center gap-1">
+          <span className={`w-2 h-2 rounded-full ${STATUS_COLORS[k]}`}></span>
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export default function WeekView({
   state,
   onAddJob,
@@ -145,8 +206,9 @@ export default function WeekView({
   filterTrailer,
   filterDriver,
 }) {
-  const weekStartISO =
-    state?.weekStart || new Date().toISOString().slice(0, 10);
+  const weekStartISO = startOfWeekMonday(
+    state?.weekStart || new Date().toISOString().slice(0, 10)
+  );
   const days = getWeekDays(weekStartISO);
   const allJobs = Array.isArray(state?.jobs) ? state.jobs : [];
 

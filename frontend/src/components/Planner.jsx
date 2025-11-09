@@ -221,6 +221,10 @@ function exceedsDriverLimitForTractor(state, job, newDriverId) {
   const alreadyIn = currentDrivers.includes(newDriverId);
   if (alreadyIn) return false;
   const afterCount = currentDrivers.length + 1;
+  // If tractor unknown yet → allow up to 2 drivers tentatively
+  if (!tractor) {
+    return afterCount > 2;
+  }
   const tractorAllowsTwo = tractor?.doubleManned === true;
   if (!tractorAllowsTwo && afterCount > 1) return true;
   if (tractorAllowsTwo && afterCount > 2) return true;
@@ -231,6 +235,32 @@ function validateWholeJob(state, candidateJob, originalJobId) {
   const dur = candidateJob.durationHours || 0;
 
   if (Array.isArray(candidateJob.driverIds)) {
+    /* VALIDATE DOUBLE-MANNED ELIGIBILITY */
+    const tractor = (state.tractors || []).find(
+      (t) => String(t.id) === String(candidateJob.tractorId)
+    );
+    const driversArr = Array.isArray(candidateJob.driverIds)
+      ? candidateJob.driverIds.filter(Boolean)
+      : [];
+    // If tractor is known: enforce MAX only (no min). If no tractor yet: allow up to 2 temporarily.
+    if (tractor) {
+      const maxDrivers = tractor?.doubleManned === true ? 2 : 1;
+      if (driversArr.length > maxDrivers) {
+        return {
+          ok: false,
+          reason: "This tractor does not allow more drivers for this job.",
+        };
+      }
+    } else {
+      if (driversArr.length > 2) {
+        return {
+          ok: false,
+          reason:
+            "A job cannot have more than two drivers before selecting a tractor.",
+        };
+      }
+    }
+
     for (const dId of candidateJob.driverIds) {
       const driver = (state.drivers || []).find((d) => d.id === dId);
       const blockReason = getDriverBlockReason(driver, candidateJob);
@@ -252,6 +282,19 @@ function validateWholeJob(state, candidateJob, originalJobId) {
           reason: `Driver "${driver?.name || dId}" is already busy on ${
             candidateJob.date
           } at ${start} for ${dur}h.`,
+        };
+      }
+      // Check compatibility for double-manned jobs
+      if (
+        tractor?.doubleManned === true &&
+        driver &&
+        driver.doubleMannedEligible === false
+      ) {
+        return {
+          ok: false,
+          reason: `Driver "${
+            driver.name || dId
+          }" cannot work as part of a double-manned crew.`,
         };
       }
       if (exceedsDriverLimitForTractor(state, candidateJob, dId)) {
@@ -758,23 +801,23 @@ export default function Planner() {
     : getStartOfWeek(new Date());
 
   function goPrevWeek() {
-    if (!isAdmin) return;
     const prev = new Date(currentWeekStart);
     prev.setDate(prev.getDate() - 7);
-    persistIfAdmin({
-      ...state,
-      weekStart: prev.toISOString().slice(0, 10),
-    });
+    if (isAdmin) {
+      persistIfAdmin({ ...state, weekStart: prev.toISOString().slice(0, 10) });
+    } else {
+      setState({ ...state, weekStart: prev.toISOString().slice(0, 10) });
+    }
   }
 
   function goNextWeek() {
-    if (!isAdmin) return;
     const next = new Date(currentWeekStart);
     next.setDate(next.getDate() + 7);
-    persistIfAdmin({
-      ...state,
-      weekStart: next.toISOString().slice(0, 10),
-    });
+    if (isAdmin) {
+      persistIfAdmin({ ...state, weekStart: next.toISOString().slice(0, 10) });
+    } else {
+      setState({ ...state, weekStart: next.toISOString().slice(0, 10) });
+    }
   }
 
   function filteredResources(list, type) {
@@ -836,7 +879,6 @@ export default function Planner() {
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={goPrevWeek}
-                disabled={!isAdmin}
                 className="p-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <ChevronLeft size={16} />
@@ -854,7 +896,6 @@ export default function Planner() {
               </div>
               <button
                 onClick={goNextWeek}
-                disabled={!isAdmin}
                 className="p-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <ChevronRight size={16} />

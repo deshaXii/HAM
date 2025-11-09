@@ -11,6 +11,42 @@ import {
   Users,
 } from "lucide-react";
 
+const STATUS_COLORS = {
+  incomplete: "bg-gray-400",
+  waiting: "bg-yellow-400",
+  processed_soon: "bg-orange-500",
+  processed: "bg-blue-500",
+  complete: "bg-green-600",
+};
+
+function computeJobStatus(job) {
+  // missing essentials?
+  if (
+    !job ||
+    !job.date ||
+    !job.start ||
+    !job.durationHours ||
+    !job.pickup ||
+    !job.dropoff ||
+    !Array.isArray(job.driverIds) ||
+    job.driverIds.length === 0 ||
+    !job.tractorId
+  ) {
+    return "incomplete";
+  }
+  const start = new Date(`${job.date}T${job.start}:00`);
+  const end = new Date(
+    start.getTime() + (Number(job.durationHours) || 0) * 3600 * 1000
+  );
+  const now = new Date();
+
+  if (now >= end) return "complete";
+  if (now >= start && now < end) return "processed";
+  const oneHourBefore = new Date(start.getTime() - 60 * 60 * 1000);
+  if (now >= oneHourBefore && now < start) return "processed_soon";
+  return "waiting";
+}
+
 const JobCard = ({ job, resources, onUpdate, onDelete, onOpen, isAdmin }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState(job);
