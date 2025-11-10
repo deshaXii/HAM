@@ -150,11 +150,14 @@ export async function apiAllTasks() {
 
 // ✅ backend عندك ماعندوش /tasks/me فهنجيب /me وبعدين /tasks/all ونفلتر
 export async function apiMyTasks() {
-  const me = await apiMe();
-  if (!me) throw new Error("Not authenticated");
-  const { tasks } = await apiAllTasks();
-  const myTasks = tasks.filter((t) => t.user && t.user.id === me.id);
-  return { tasks: myTasks };
+  const r = await fetch(`${BASE}/tasks/me`, { headers: authHeaders() });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || j.message || "Failed to load my tasks");
+
+  // التطبيع
+  if (Array.isArray(j?.tasks)) return { tasks: j.tasks };
+  if (Array.isArray(j)) return { tasks: j };
+  return { tasks: [] };
 }
 
 export async function apiCreateTask({ userId, title, items }) {
@@ -270,7 +273,7 @@ export async function apiUploadDriverPhoto(driverId, file) {
   const t = getToken();
   if (t) headers.Authorization = `Bearer ${t}`;
 
-  const r = await fetch(`${BASE}/api/upload/driver-photo/${driverId}`, {
+  const r = await fetch(`${BASE}/upload/driver-photo/${driverId}`, {
     method: "POST",
     headers,
     body: fd,

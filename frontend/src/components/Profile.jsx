@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { apiMyTasks, apiUpdateTaskItem, apiGetNotice } from "../lib/api";
+import NyTasks from "./MyTasks";
 import { useAuth } from "../contexts/AuthContext";
 
 export default function Profile() {
@@ -132,87 +133,88 @@ export default function Profile() {
 
       {/* tasks for non-admin */}
       {user?.role !== "admin" && (
-        <section className="bg-white shadow rounded-xl border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            Required Tasks
-          </h2>
+        <NyTasks />
+        // <section className="bg-white shadow rounded-xl border border-gray-200 p-6">
+        //   <h2 className="text-lg font-semibold text-gray-900 mb-4">
+        //     Required Tasks
+        //   </h2>
 
-          {tasks.length === 0 ? (
-            <div className="text-sm text-gray-500">
-              No tasks assigned to you.
-            </div>
-          ) : (
-            <div className="space-y-6">
-              {tasks.map((task) => (
-                <div
-                  key={task.id}
-                  className="bg-gray-50 border border-gray-300 rounded-lg p-4"
-                >
-                  <div className="font-medium text-gray-900 text-base mb-4">
-                    {task.title}
-                  </div>
+        //   {tasks.length === 0 ? (
+        //     <div className="text-sm text-gray-500">
+        //       No tasks assigned to you.
+        //     </div>
+        //   ) : (
+        //     <div className="space-y-6">
+        //       {tasks.map((task) => (
+        //         <div
+        //           key={task.id}
+        //           className="bg-gray-50 border border-gray-300 rounded-lg p-4"
+        //         >
+        //           <div className="font-medium text-gray-900 text-base mb-4">
+        //             {task.title}
+        //           </div>
 
-                  <div className="space-y-4 text-sm">
-                    {(task.items || []).map((item) => {
-                      const d = drafts[item.id] || {
-                        done: !!item.done,
-                        comment: item.comment || "",
-                      };
+        //           <div className="space-y-4 text-sm">
+        //             {(task.items || []).map((item) => {
+        //               const d = drafts[item.id] || {
+        //                 done: !!item.done,
+        //                 comment: item.comment || "",
+        //               };
 
-                      return (
-                        <div
-                          key={item.id}
-                          className="bg-white border border-gray-200 rounded-lg p-4"
-                        >
-                          <div className="flex items-start gap-3">
-                            <input
-                              type="checkbox"
-                              className="mt-1 w-4 h-4 text-blue-600 rounded border-gray-300 cursor-pointer"
-                              checked={d.done}
-                              onChange={() => toggleDoneLocal(item.id)}
-                            />
+        //               return (
+        //                 <div
+        //                   key={item.id}
+        //                   className="bg-white border border-gray-200 rounded-lg p-4"
+        //                 >
+        //                   <div className="flex items-start gap-3">
+        //                     <input
+        //                       type="checkbox"
+        //                       className="mt-1 w-4 h-4 text-blue-600 rounded border-gray-300 cursor-pointer"
+        //                       checked={d.done}
+        //                       onChange={() => toggleDoneLocal(item.id)}
+        //                     />
 
-                            <div className="flex-1">
-                              <div
-                                className={`text-sm font-medium ${
-                                  d.done
-                                    ? "text-gray-400 line-through"
-                                    : "text-gray-800"
-                                }`}
-                              >
-                                {item.text}
-                              </div>
+        //                     <div className="flex-1">
+        //                       <div
+        //                         className={`text-sm font-medium ${
+        //                           d.done
+        //                             ? "text-gray-400 line-through"
+        //                             : "text-gray-800"
+        //                         }`}
+        //                       >
+        //                         {item.text}
+        //                       </div>
 
-                              <div className="mt-3">
-                                <textarea
-                                  className="input-field w-full min-h-[120px] text-sm leading-relaxed"
-                                  placeholder="اكتب ملاحظتك..."
-                                  value={d.comment}
-                                  onChange={(e) =>
-                                    updateCommentLocal(item.id, e.target.value)
-                                  }
-                                />
-                              </div>
+        //                       <div className="mt-3">
+        //                         <textarea
+        //                           className="input-field w-full min-h-[120px] text-sm leading-relaxed"
+        //                           placeholder="اكتب ملاحظتك..."
+        //                           value={d.comment}
+        //                           onChange={(e) =>
+        //                             updateCommentLocal(item.id, e.target.value)
+        //                           }
+        //                         />
+        //                       </div>
 
-                              <div className="mt-3 flex justify-end">
-                                <button
-                                  onClick={() => saveItem(task.id, item.id)}
-                                  className="bg-blue-600 text-white text-xs font-medium px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-                                >
-                                  Save Update
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+        //                       <div className="mt-3 flex justify-end">
+        //                         <button
+        //                           onClick={() => saveItem(task.id, item.id)}
+        //                           className="bg-blue-600 text-white text-xs font-medium px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+        //                         >
+        //                           Save Update
+        //                         </button>
+        //                       </div>
+        //                     </div>
+        //                   </div>
+        //                 </div>
+        //               );
+        //             })}
+        //           </div>
+        //         </div>
+        //       ))}
+        //     </div>
+        //   )}
+        // </section>
       )}
     </div>
   );

@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import useServerEventRefetch from "../hooks/useServerEventRefetch";
 import {
   Plus,
   Trash2,
@@ -203,25 +204,27 @@ export default function Admin() {
   const [draft, setDraft] = useState(defaultState);
   const [loading, setLoading] = useState(true);
 
-  // load from API
-  useEffect(() => {
-    (async () => {
-      try {
-        const apiState = await apiGetState(); // ممكن يرجع {}
-        const safe = buildSafeState(apiState);
-        setServerState(safe);
-        setDraft(safe);
-      } catch (e) {
-        console.warn("Could not load state from API:", e);
-        // fallback
-        const safe = buildSafeState(null);
-        setServerState(safe);
-        setDraft(safe);
-      } finally {
-        setLoading(false);
-      }
-    })();
+  const loadState = useCallback(async () => {
+    try {
+      const apiState = await apiGetState();
+      const safe = buildSafeState(apiState);
+      setServerState(safe);
+      setDraft(safe);
+    } catch {
+      const safe = buildSafeState(null);
+      setServerState(safe);
+      setDraft(safe);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    loadState();
+  }, [loadState]);
+
+  // أي حفظ من أدمن آخر (أو تحديث على السيرفر) يضرب إعادة جلب
+  useServerEventRefetch(["state:updated"], loadState);
 
   const handleSaveChanges = async () => {
     try {

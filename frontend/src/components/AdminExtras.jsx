@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   apiGetNotice,
   apiSetNotice,
@@ -14,7 +14,7 @@ import {
   apiDeleteUser, // NEW
 } from "../lib/api";
 import { useAuth } from "../contexts/AuthContext";
-
+import useServerEventRefetch from "../hooks/useServerEventRefetch";
 /* ---------------------------------
    PANEL 1: Global Notice
 ----------------------------------*/
@@ -23,18 +23,18 @@ function AdminNoticePanel() {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await apiGetNotice();
-        // back may return {message} or {content}
-        setMessage(res.message ?? res.content ?? "");
-        setSavedAt(res.updatedAt || null);
-      } catch (err) {
-        console.error(err);
-      }
-    })();
+  const refetch = useCallback(async () => {
+    try {
+      const res = await apiGetNotice();
+      setMessage(res.message ?? res.content ?? "");
+      setSavedAt(res.updatedAt || null);
+    } catch {}
   }, []);
+
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
+  useServerEventRefetch(["notice:updated"], refetch);
 
   async function saveNotice() {
     setSaving(true);
@@ -96,25 +96,28 @@ function AdminRolePanel() {
     return [];
   }
 
-  async function loadUsers() {
+  const loadUsers = useCallback(async () => {
     setLoading(true);
     try {
       const res = await apiListUsers();
-      const list = normalizeUsersResponse(res);
-      setUsers(list || []);
+      setUsers(normalizeUsersResponse(res) || []);
       setErr("");
     } catch (e) {
-      console.error(e);
       setErr(e.message || "Failed to load users");
       setUsers([]);
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     loadUsers();
   }, []);
+
+  useServerEventRefetch(
+    ["user:updated", "user:deleted", "user:role"],
+    loadUsers
+  );
 
   const adminCount = users.filter((u) => u.role === "admin").length;
 
@@ -374,26 +377,34 @@ function AdminTasksPanel() {
     return [];
   }
 
-  async function loadAll() {
+  const loadAll = useCallback(async () => {
     setLoading(true);
     try {
       const [tasksRes, usersRes] = await Promise.all([
         apiAllTasks(),
         apiListUsers(),
       ]);
-      const normUsers = normalizeUsersResponse(usersRes);
-      setUsersForAssign(normUsers || []);
+      setUsersForAssign(normalizeUsersResponse(usersRes) || []);
       setTasks(tasksRes.tasks || []);
-    } catch (e) {
-      console.error(e);
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     loadAll();
   }, []);
+
+  useServerEventRefetch(
+    [
+      "task:created",
+      "task:updated",
+      "task:deleted",
+      "task:item-updated",
+      "task:item-deleted",
+    ],
+    loadAll
+  );
 
   async function createTask() {
     if (!newUserId || !newTitle) return;
