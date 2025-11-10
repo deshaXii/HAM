@@ -14,6 +14,7 @@ async function updateNotice(req, res) {
     `UPDATE notices SET content=?, updated_by=?, updated_at=CURRENT_TIMESTAMP WHERE id=1`,
     [content || "", req.user.id]
   );
+  broadcast("notice:updated", { updatedAt: new Date().toISOString() });
   return res.json({ ok: true });
 }
 

@@ -170,6 +170,7 @@ async function saveState(req, res) {
     return res.json(merged);
   } catch (err) {
     console.error("saveState error:", err);
+    broadcast("state:updated", { updatedAt: Date.now() });
     return res.status(500).json({ error: "Failed to save state" });
   }
 }

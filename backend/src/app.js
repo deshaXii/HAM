@@ -28,7 +28,7 @@ app.use(morgan("dev"));
 
 // ملفات الرفع
 app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
-
+app.use(require("./routes/realtime"));
 app.use("/auth", authRoutes);
 app.use("/state", stateRoutes);
 app.use("/notice", noticeRoutes);
