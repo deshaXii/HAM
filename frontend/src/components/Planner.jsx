@@ -27,6 +27,21 @@ import JobModal from "./JobModal";
 import { apiGetState, apiSaveState } from "../lib/api";
 import { useAuth } from "../contexts/AuthContext";
 
+function toISODateLocal(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
+function getStartOfWeek(date) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = (day + 6) % 7; // Monday
+  d.setDate(d.getDate() - diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
 function timeToMinutes(t) {
   if (!t) return 0;
   const [h, m] = String(t)
@@ -341,14 +356,6 @@ function validateWholeJob(state, candidateJob, originalJobId) {
   }
 
   return { ok: true };
-}
-function getStartOfWeek(date) {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diff = (day + 6) % 7;
-  d.setDate(d.getDate() - diff);
-  d.setHours(0, 0, 0, 0);
-  return d;
 }
 
 export default function Planner() {
@@ -803,20 +810,22 @@ export default function Planner() {
   function goPrevWeek() {
     const prev = new Date(currentWeekStart);
     prev.setDate(prev.getDate() - 7);
+    const iso = toISODateLocal(prev);
     if (isAdmin) {
-      persistIfAdmin({ ...state, weekStart: prev.toISOString().slice(0, 10) });
+      persistIfAdmin({ ...state, weekStart: iso });
     } else {
-      setState({ ...state, weekStart: prev.toISOString().slice(0, 10) });
+      setState({ ...state, weekStart: iso });
     }
   }
 
   function goNextWeek() {
     const next = new Date(currentWeekStart);
     next.setDate(next.getDate() + 7);
+    const iso = toISODateLocal(next);
     if (isAdmin) {
-      persistIfAdmin({ ...state, weekStart: next.toISOString().slice(0, 10) });
+      persistIfAdmin({ ...state, weekStart: iso });
     } else {
-      setState({ ...state, weekStart: next.toISOString().slice(0, 10) });
+      setState({ ...state, weekStart: iso });
     }
   }
 

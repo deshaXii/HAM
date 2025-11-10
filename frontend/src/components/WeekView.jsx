@@ -1,4 +1,3 @@
-// src/components/WeekView.jsx
 import React from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { Plus, AlertTriangle } from "lucide-react";
@@ -11,6 +10,48 @@ const STATUS_COLORS = {
   processed: "bg-blue-500",
   complete: "bg-green-600",
 };
+
+// ===== Helpers (محلية 100%) =====
+function toISODateLocal(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
+function parseISODateLocal(str) {
+  const [y, m, d] = String(str)
+    .split("-")
+    .map((n) => parseInt(n, 10));
+  return new Date(y, (m || 1) - 1, d || 1, 0, 0, 0, 0); // محلي
+}
+
+function formatDateLocal(date) {
+  return toISODateLocal(date); // ثابت بدون مشاكل UTC
+}
+
+function startOfWeekMonday(dateISO) {
+  const d = parseISODateLocal(dateISO);
+  d.setHours(0, 0, 0, 0);
+  const day = d.getDay(); // 0 Sun ... 6 Sat
+  const diff = day === 0 ? -6 : 1 - day; // Monday as start
+  const monday = new Date(d);
+  monday.setDate(d.getDate() + diff);
+  return toISODateLocal(monday);
+}
+function getWeekDays(weekStartISO) {
+  const base = parseISODateLocal(weekStartISO);
+  base.setHours(0, 0, 0, 0);
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(base);
+    d.setDate(base.getDate() + i);
+    d.setHours(0, 0, 0, 0);
+    days.push(d);
+  }
+  return days;
+}
+// ===== end helpers =====
+
 function computeJobStatus(job) {
   if (
     !job ||
@@ -36,42 +77,19 @@ function computeJobStatus(job) {
   if (now >= oneHourBefore && now < start) return "processed_soon";
   return "waiting";
 }
-function formatDateLocal(date) {
-  return date.toLocaleDateString("en-CA");
-}
 
-function startOfWeekMonday(dateISO) {
-  const d = new Date(dateISO);
-  d.setHours(0, 0, 0, 0);
-  const day = d.getDay(); // 0 Sun ... 6 Sat
-  const diff = day === 0 ? -6 : 1 - day; // shift so Monday is start
-  const monday = new Date(d);
-  monday.setDate(d.getDate() + diff);
-  return monday.toISOString().slice(0, 10);
-}
-function getWeekDays(weekStartISO) {
-  const base = new Date(weekStartISO);
-  base.setHours(0, 0, 0, 0);
-  const days = [];
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(base);
-    d.setDate(base.getDate() + i);
-    d.setHours(0, 0, 0, 0);
-    days.push(d);
-  }
-  return days;
-}
-
-function SlotDroppable({ dateISO, slot, children }) {
+function SlotDroppable({ dateISO, slot, children, highlight = false }) {
   const id = `slot|${dateISO}|${slot}`;
   const { setNodeRef, isOver } = useDroppable({ id });
 
   return (
     <div
       ref={setNodeRef}
-      className={`min-h-[110px] rounded-lg border border-dashed transition-colors ${
-        isOver ? "border-blue-400 bg-blue-50/60" : "border-gray-200 bg-white"
-      }`}
+      className={[
+        "min-h-[110px] rounded-lg border border-dashed transition-colors",
+        isOver ? "border-blue-400 bg-blue-50/60" : "border-gray-200 bg-white",
+        highlight ? "ring-1 ring-blue-300" : "",
+      ].join(" ")}
     >
       {children}
     </div>
@@ -87,9 +105,7 @@ function JobCard({
   tractor,
   trailer,
 }) {
-  const { setNodeRef, isOver } = useDroppable({
-    id: job.id,
-  });
+  const { setNodeRef, isOver } = useDroppable({ id: job.id });
 
   const start = job.start || (job.slot === "night" ? "20:00" : "08:00");
   const dur = job.durationHours || 0;
@@ -206,11 +222,13 @@ export default function WeekView({
   filterTrailer,
   filterDriver,
 }) {
+  // ✅ Monday-first week using LOCAL dates
   const weekStartISO = startOfWeekMonday(
-    state?.weekStart || new Date().toISOString().slice(0, 10)
+    state?.weekStart || toISODateLocal(new Date())
   );
   const days = getWeekDays(weekStartISO);
   const allJobs = Array.isArray(state?.jobs) ? state.jobs : [];
+  const todayISO = toISODateLocal(new Date());
 
   function jobPassesFilters(job) {
     if (filterTractor && String(job.tractorId) !== String(filterTractor))
@@ -232,6 +250,7 @@ export default function WeekView({
       <div className="grid grid-cols-7 gap-3 min-w-[1100px]">
         {days.map((dayDate) => {
           const iso = formatDateLocal(dayDate);
+          const isToday = iso === todayISO;
 
           const bigWeekday = dayDate.toLocaleDateString(undefined, {
             weekday: "long",
@@ -244,10 +263,7 @@ export default function WeekView({
           const jobsOfDay = allJobs
             .filter((j) => j.date && j.date.slice(0, 10) === iso)
             .filter(jobPassesFilters)
-            .map((j) => ({
-              ...j,
-              slot: j.slot === "night" ? "night" : "day",
-            }));
+            .map((j) => ({ ...j, slot: j.slot === "night" ? "night" : "day" }));
 
           const dayJobs = jobsOfDay.filter((j) => j.slot === "day");
           const nightJobs = jobsOfDay.filter((j) => j.slot === "night");
@@ -255,7 +271,14 @@ export default function WeekView({
           return (
             <div key={iso} className="flex flex-col gap-2">
               <Link to={`/day/${iso}`}>
-                <div className="rounded-lg bg-gray-50 border border-gray-200 p-2 text-center">
+                <div
+                  className={[
+                    "rounded-lg bg-gray-50 border p-2 text-center transition-all",
+                    isToday
+                      ? "border-blue-500 ring-2 ring-blue-200"
+                      : "border-gray-200",
+                  ].join(" ")}
+                >
                   <div className="text-xs font-semibold text-gray-700 truncate">
                     {bigWeekday}
                   </div>
@@ -278,7 +301,7 @@ export default function WeekView({
                   </button>
                 )}
               </div>
-              <SlotDroppable dateISO={iso} slot="day">
+              <SlotDroppable dateISO={iso} slot="day" highlight={isToday}>
                 <div className="p-2">
                   {dayJobs.length === 0 ? (
                     <div className="text-[10px] text-gray-400 italic">
@@ -326,7 +349,7 @@ export default function WeekView({
                   </button>
                 )}
               </div>
-              <SlotDroppable dateISO={iso} slot="night">
+              <SlotDroppable dateISO={iso} slot="night" highlight={isToday}>
                 <div className="p-2">
                   {nightJobs.length === 0 ? (
                     <div className="text-[10px] text-gray-400 italic">
