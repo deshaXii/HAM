@@ -1,20 +1,34 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { apiSignup } from "../lib/api";
 import { useAuth } from "../contexts/AuthContext";
 import { useNavigate, Link } from "react-router-dom";
 
 export default function Signup() {
+  // لو عندك شرط إظهار الصفحة من ENV في الواجهة
+  const allow =
+    String(import.meta.env.VITE_ALLOW_SIGNUP || "true").toLowerCase() ===
+    "true";
+  const nav = useNavigate();
+  useEffect(() => {
+    if (!allow) nav("/login");
+  }, [allow, nav]);
+
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
   const { setUser } = useAuth();
-  const nav = useNavigate();
 
   const submit = async (e) => {
     e.preventDefault();
+    setErr("");
     try {
-      const res = await apiSignup({ name, email, password });
+      if (!inviteCode.trim()) {
+        setErr("Invite code is required");
+        return;
+      }
+      const res = await apiSignup({ name, email, password, inviteCode });
       setUser(res.user);
       nav("/plan");
     } catch (e) {
@@ -35,17 +49,13 @@ export default function Signup() {
               Welcome 👋
             </div>
             <div className="text-white/70 text-sm mt-4 leading-relaxed">
-              The first account registered in the system will
-              <span className="text-white font-semibold">
-                {" "}
-                automatically be an admin{" "}
-              </span>
-              with control over task management and work monitoring.
+              Registration requires a valid{" "}
+              <span className="text-white font-semibold">Invite Code</span>.
             </div>
           </div>
 
           <div className="text-white/40 text-xs">
-            Important: Keep your credentials safe.
+            Keep your credentials safe.
           </div>
         </div>
 
@@ -55,7 +65,7 @@ export default function Signup() {
             Create New Account
           </h1>
           <p className="text-sm text-gray-500 mb-6">
-            Sign up to start managing your fleet and tracking tasks.
+            Use your invite code to complete registration.
           </p>
 
           {err && (
@@ -86,6 +96,19 @@ export default function Signup() {
                 placeholder="email@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+
+            {/* جديد: كود الدعوة */}
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Invite Code
+              </label>
+              <input
+                className="input-field w-full"
+                placeholder="Enter your invite code"
+                value={inviteCode}
+                onChange={(e) => setInviteCode(e.target.value)}
               />
             </div>
 

@@ -311,14 +311,23 @@ function AdminRolePanel() {
                           >
                             Edit
                           </button>
-                          <button
-                            onClick={() => removeUser(u)}
-                            className="px-2 py-1 rounded-md border border-red-300 text-[12px] text-red-600 hover:bg-red-50 disabled:opacity-60"
-                            disabled={busyId === u.id}
-                            title={isSelf ? "You cannot delete yourself" : ""}
-                          >
-                            Delete
-                          </button>
+                          {u.role !== "admin" ? (
+                            <button
+                              onClick={() => removeUser(u)}
+                              className="px-2 py-1 rounded-md border border-red-300 text-[12px] text-red-600 hover:bg-red-50 disabled:opacity-60"
+                              disabled={busyId === u.id}
+                              title={isSelf ? "You cannot delete yourself" : ""}
+                            >
+                              Delete
+                            </button>
+                          ) : (
+                            <span
+                              className="px-2 py-1 rounded-md border border-slate-200 text-[11px] text-slate-400 cursor-not-allowed"
+                              title="Admins cannot be deleted"
+                            >
+                              Admin
+                            </span>
+                          )}
                         </div>
                       ) : (
                         <div className="flex items-center justify-center gap-2">

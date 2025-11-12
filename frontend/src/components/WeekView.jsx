@@ -101,7 +101,7 @@ function JobCard({
   onOpen,
   onDelete,
   isAdmin,
-  driverNames,
+  driverEntries,
   tractor,
   trailer,
 }) {
@@ -167,13 +167,13 @@ function JobCard({
       </div>
 
       <div className="flex flex-wrap gap-1">
-        {driverNames && driverNames.length > 0 ? (
-          driverNames.map((n) => (
+        {driverEntries && driverEntries.length > 0 ? (
+          driverEntries.map((d, idx) => (
             <span
-              key={n}
+              key={d.id || `${d.label}-${idx}`}
               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 text-[10px]"
             >
-              👤 {n}
+              👤 {d.label}
             </span>
           ))
         ) : (
@@ -309,10 +309,19 @@ export default function WeekView({
                     </div>
                   ) : (
                     dayJobs.map((job) => {
-                      const driverNames = (job.driverIds || [])
-                        .map((dId) => state.drivers?.find((d) => d.id === dId))
-                        .filter(Boolean)
-                        .map((d) => d.name || d.code || d.id);
+                      const driverEntries = (job.driverIds || [])
+                        .map((dId) => {
+                          const d = state.drivers?.find(
+                            (d) => String(d.id) === String(dId)
+                          );
+                          return d
+                            ? {
+                                id: String(d.id),
+                                label: d.name || d.code || String(d.id),
+                              }
+                            : null;
+                        })
+                        .filter(Boolean);
                       const tractor = (state.tractors || []).find(
                         (t) => String(t.id) === String(job.tractorId)
                       );
@@ -326,7 +335,7 @@ export default function WeekView({
                           onOpen={onOpenJob}
                           onDelete={onDeleteJob}
                           isAdmin={isAdmin}
-                          driverNames={driverNames}
+                          driverEntries={driverEntries}
                           tractor={tractor}
                           trailer={trailer}
                         />
@@ -357,10 +366,19 @@ export default function WeekView({
                     </div>
                   ) : (
                     nightJobs.map((job) => {
-                      const driverNames = (job.driverIds || [])
-                        .map((dId) => state.drivers?.find((d) => d.id === dId))
-                        .filter(Boolean)
-                        .map((d) => d.name || d.code || d.id);
+                      const driverEntries = (job.driverIds || [])
+                        .map((dId) => {
+                          const d = state.drivers?.find(
+                            (d) => String(d.id) === String(dId)
+                          );
+                          return d
+                            ? {
+                                id: String(d.id),
+                                label: d.name || d.code || String(d.id),
+                              }
+                            : null;
+                        })
+                        .filter(Boolean);
                       const tractor = (state.tractors || []).find(
                         (t) => String(t.id) === String(job.tractorId)
                       );
@@ -374,7 +392,7 @@ export default function WeekView({
                           onOpen={onOpenJob}
                           onDelete={onDeleteJob}
                           isAdmin={isAdmin}
-                          driverNames={driverNames}
+                          driverEntries={driverEntries}
                           tractor={tractor}
                           trailer={trailer}
                         />

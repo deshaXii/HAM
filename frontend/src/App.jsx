@@ -10,6 +10,7 @@ import {
 
 import Admin from "./components/Admin";
 import Login from "./components/Login";
+import Reports from "./components/Reports";
 import Signup from "./components/Signup";
 import Profile from "./components/Profile";
 import Planner from "./components/Planner";
@@ -18,7 +19,7 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import AdminRoute from "./components/AdminRoute";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Agenda from "./components/Agenda";
-import { Truck, Users, CalendarDays, MapPin } from "lucide-react";
+import { Truck, Users, CalendarDays, Printer, MapPin } from "lucide-react";
 import AdminDriversPage from "./components/Drivers";
 import LocationsMap from "./components/LocationsMap"; // <<< NEW
 
@@ -47,6 +48,13 @@ function Navigation() {
       icon: Truck,
       label: "Planner",
       role: "normal",
+      color: "text-blue-600",
+    },
+    {
+      path: "/reports",
+      icon: Printer,
+      label: "Reports",
+      role: "admin",
       color: "text-blue-600",
     },
     {
@@ -167,6 +175,14 @@ function AppInner() {
               element={
                 <ProtectedRoute>
                   <Planner />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/reports"
+              element={
+                <ProtectedRoute>
+                  <Reports />
                 </ProtectedRoute>
               }
             />

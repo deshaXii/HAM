@@ -1,3 +1,4 @@
+// src/components/AdminDriverSchedule.jsx
 import React, { useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -25,30 +26,30 @@ function initialsOf(name) {
 
 /*
 props:
- - drivers: state.drivers
- - onSaveDrivers(nextDriversArray): function
+- drivers: state.drivers
+- onSaveDrivers(nextDriversArray): function
 */
-
 export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
 
-  // نعمل normalizing لكل driver جاي من الباك
+  // normalize each driver
   const [local, setLocal] = useState(
     (drivers || []).map((d) => ({
       id: d.id,
       name: d.name || "",
       code: d.code || "",
       photoUrl: d.photoUrl || "",
-      // دول موجودين في الـ response عندك
+      // flags
       canNight: !!d.canNight,
       sleepsInCab: !!d.sleepsInCab,
       doubleMannedEligible: !!d.doubleMannedEligible,
-      // أهم سطر 👇 لو السيرفر ما بعتش weekAvailability
+      // NEW: rating (default 0)
+      rating: Number.isFinite(Number(d.rating)) ? Number(d.rating) : 0,
+      // week/leave
       weekAvailability: Array.isArray(d.weekAvailability)
         ? d.weekAvailability
         : [1, 2, 3, 4, 5],
-      // أجازات اليوم الواحد
       leaves: Array.isArray(d.leaves) ? d.leaves : [],
     }))
   );
@@ -58,6 +59,20 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
       <div className="p-4 text-sm text-gray-500">
         Only admin can edit driver schedules.
       </div>
+    );
+  }
+
+  function clampRating(n) {
+    const x = Number(n);
+    if (!Number.isFinite(x)) return 0;
+    return Math.max(0, Math.min(5, x));
+  }
+
+  function setRating(driverId, value) {
+    setLocal((prev) =>
+      prev.map((drv) =>
+        drv.id === driverId ? { ...drv, rating: clampRating(value) } : drv
+      )
     );
   }
 
@@ -95,7 +110,6 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
   }
 
   function saveAll() {
-    // لازم نرجّع نفس شكل الداتا اللي التخطيط والباك إند متوقعينه
     const normalized = local.map((d) => ({
       id: d.id,
       name: d.name,
@@ -104,12 +118,13 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
       canNight: !!d.canNight,
       sleepsInCab: !!d.sleepsInCab,
       doubleMannedEligible: !!d.doubleMannedEligible,
+      // NEW: include rating
+      rating: clampRating(d.rating),
       weekAvailability: Array.isArray(d.weekAvailability)
         ? d.weekAvailability.slice().sort()
         : [],
       leaves: Array.isArray(d.leaves) ? d.leaves : [],
     }));
-
     onSaveDrivers && onSaveDrivers(normalized);
   }
 
@@ -157,7 +172,7 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
                   <div className="text-gray-900 font-semibold text-sm truncate">
                     {drv.name || "(no name)"}{" "}
                     <span className="text-gray-500 font-normal">
-                      {drv.code ? `• ${drv.code}` : ""}
+                      {drv.code ? ` • ${drv.code}` : ""}
                     </span>
                   </div>
                   <div className="text-[11px] text-gray-500 truncate">
@@ -175,7 +190,6 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
                   />
                   <span className="text-gray-700">Night shift OK</span>
                 </label>
-
                 <label className="flex items-center gap-2 cursor-pointer select-none">
                   <input
                     type="checkbox"
@@ -184,7 +198,6 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
                   />
                   <span className="text-gray-700">Sleeps in cab</span>
                 </label>
-
                 <label className="flex items-center gap-2 cursor-pointer select-none">
                   <input
                     type="checkbox"
@@ -192,6 +205,20 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
                     onChange={() => toggleField(drv.id, "doubleMannedEligible")}
                   />
                   <span className="text-gray-700">2-man eligible</span>
+                </label>
+
+                {/* NEW: rating input */}
+                <label className="flex items-center gap-2 select-none">
+                  <span className="text-gray-700">Rating</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={5}
+                    step={0.5}
+                    value={drv.rating}
+                    onChange={(e) => setRating(drv.id, e.target.value)}
+                    className="w-20 border border-gray-300 rounded-md px-2 py-1 text-xs"
+                  />
                 </label>
               </div>
             </div>
@@ -240,11 +267,10 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
             </div>
 
             <div className="text-[11px] text-gray-500 border-t pt-2">
-              - Night shift OK = can be used in night jobs.
-              <br />
-              - Sleeps in cab = can do overnight trips requiring cab.
-              <br />- 2-man eligible = driver can be on double-manned jobs
-              (tractor must allow double man too).
+              - Night shift OK = can be used in night jobs. <br />- Sleeps in
+              cab = can do overnight trips requiring cab. <br />- 2-man eligible
+              = driver can be on double-manned jobs (tractor must allow double
+              man too).
             </div>
           </div>
         ))}

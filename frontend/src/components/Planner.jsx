@@ -110,17 +110,19 @@ function normalizeLocations(raw) {
 function buildSafeState(raw) {
   const src = raw || {};
   const jobs = Array.isArray(src.jobs) ? src.jobs.map(normalizeJobSlot) : [];
-
-  // ما نحولش tractorId لأرقام.. سيبه زي ما جاي (string/GUID)
   const jobsWithNormalizedIds = jobs.map((j) => ({
     ...j,
-    tractorId: j.tractorId ?? "", // لو undefined خليه ""
+    tractorId: j.tractorId ?? "",
   }));
-
   const normalizedLocations = normalizeLocations(src.locations);
   return {
     jobs: jobsWithNormalizedIds,
-    drivers: Array.isArray(src.drivers) ? src.drivers : [],
+    drivers: Array.isArray(src.drivers)
+      ? src.drivers.map((d) => ({
+          ...d,
+          rating: Number.isFinite(Number(d?.rating)) ? Number(d.rating) : 0, // NEW
+        }))
+      : [],
     tractors: Array.isArray(src.tractors) ? src.tractors : [],
     trailers: Array.isArray(src.trailers) ? src.trailers : [],
     locations: normalizedLocations,
@@ -139,12 +141,7 @@ function buildSafeState(raw) {
               driverHourCost: 22.5,
               nightPremiumPct: 25,
             },
-            trailerDayCost: {
-              reefer: 35,
-              box: 20,
-              taut: 18,
-              chassis: 15,
-            },
+            trailerDayCost: { reefer: 35, box: 20, taut: 18, chassis: 15 },
           },
     weekStart: src.weekStart || new Date().toISOString().slice(0, 10),
   };
@@ -828,32 +825,45 @@ export default function Planner() {
       setState({ ...state, weekStart: iso });
     }
   }
-
   function filteredResources(list, type) {
     const q = searchTerm.toLowerCase().trim();
-    if (!q) return list || [];
-    if (type === "tractor") {
-      return (list || []).filter(
-        (t) =>
-          (t.code || "").toLowerCase().includes(q) ||
-          (t.plate || "").toLowerCase().includes(q)
-      );
+    let arr = list || [];
+
+    if (q) {
+      if (type === "tractor") {
+        arr = arr.filter(
+          (t) =>
+            (t.code || "").toLowerCase().includes(q) ||
+            (t.plate || "").toLowerCase().includes(q)
+        );
+      } else if (type === "trailer") {
+        arr = arr.filter(
+          (t) =>
+            (t.code || "").toLowerCase().includes(q) ||
+            (t.type || "").toLowerCase().includes(q)
+        );
+      } else if (type === "driver") {
+        arr = arr.filter(
+          (d) =>
+            (d.name || "").toLowerCase().includes(q) ||
+            (d.code || "").toLowerCase().includes(q)
+        );
+      }
     }
-    if (type === "trailer") {
-      return (list || []).filter(
-        (t) =>
-          (t.code || "").toLowerCase().includes(q) ||
-          (t.type || "").toLowerCase().includes(q)
-      );
-    }
+
+    // NEW: sort drivers by rating DESC, then name ASC
     if (type === "driver") {
-      return (list || []).filter(
-        (d) =>
-          (d.name || "").toLowerCase().includes(q) ||
-          (d.code || "").toLowerCase().includes(q)
-      );
+      arr = [...arr].sort((a, b) => {
+        const ra = Number.isFinite(Number(a?.rating)) ? Number(a.rating) : 0;
+        const rb = Number.isFinite(Number(b?.rating)) ? Number(b.rating) : 0;
+        if (rb !== ra) return rb - ra; // higher first
+        const na = (a.name || a.code || "").toLowerCase();
+        const nb = (b.name || b.code || "").toLowerCase();
+        return na.localeCompare(nb);
+      });
     }
-    return list || [];
+
+    return arr;
   }
 
   if (loading) {
@@ -991,32 +1001,33 @@ export default function Planner() {
         onDragEnd={handleDragEnd}
       >
         <div className="flex flex-col xl:flex-row gap-4">
-          <div className="w-full xl:w-[240px] flex-shrink-0 flex flex-col gap-4">
-            <div className="sticky top-0 left-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden overflow-y-scroll h-[100vh] pt-2 pb-4 flex flex-col gap-4">
-              <ResourcePool
-                title="Tractors"
-                icon={Truck}
-                resources={filteredResources(state.tractors || [], "tractor")}
-                type="tractor"
-                jobs={state.jobs || []}
-              />
-              <ResourcePool
-                title="Trailers"
-                icon={Package}
-                resources={filteredResources(state.trailers || [], "trailer")}
-                type="trailer"
-                jobs={state.jobs || []}
-              />
-              <ResourcePool
-                title="Drivers"
-                icon={Users}
-                resources={filteredResources(state.drivers || [], "driver")}
-                type="driver"
-                jobs={state.jobs || []}
-              />
+          {isAdmin && (
+            <div className="w-full xl:w-[240px] flex-shrink-0 flex flex-col gap-4">
+              <div className="sticky top-0 left-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden overflow-y-scroll h-[100vh] pt-2 pb-4 flex flex-col gap-4">
+                <ResourcePool
+                  title="Tractors"
+                  icon={Truck}
+                  resources={filteredResources(state.tractors || [], "tractor")}
+                  type="tractor"
+                  jobs={state.jobs || []}
+                />
+                <ResourcePool
+                  title="Trailers"
+                  icon={Package}
+                  resources={filteredResources(state.trailers || [], "trailer")}
+                  type="trailer"
+                  jobs={state.jobs || []}
+                />
+                <ResourcePool
+                  title="Drivers"
+                  icon={Users}
+                  resources={filteredResources(state.drivers || [], "driver")}
+                  type="driver"
+                  jobs={state.jobs || []}
+                />
+              </div>
             </div>
-          </div>
-
+          )}
           <div className="flex-1 min-w-0">
             <WeekView
               state={state}

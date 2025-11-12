@@ -1,3 +1,4 @@
+// src/pages/Admin.jsx
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import useServerEventRefetch from "../hooks/useServerEventRefetch";
 import {
@@ -34,13 +35,18 @@ const defaultState = {
   distanceKm: {},
 };
 
-/* ✅ دالة تطبيع: تضمن وجود الاريهات حتى لو الـ API رجّع {} */
+/* ✅ تطبيع: تأمين الحقول وإضافة rating للسائقين */
 function buildSafeState(raw) {
   const src = raw || {};
   return {
     ...defaultState,
     ...src,
-    drivers: Array.isArray(src.drivers) ? src.drivers : [],
+    drivers: Array.isArray(src.drivers)
+      ? src.drivers.map((d) => ({
+          ...d,
+          rating: Number.isFinite(Number(d?.rating)) ? Number(d.rating) : 0,
+        }))
+      : [],
     tractors: Array.isArray(src.tractors) ? src.tractors : [],
     trailers: Array.isArray(src.trailers) ? src.trailers : [],
     jobs: Array.isArray(src.jobs) ? src.jobs : [],
@@ -53,38 +59,39 @@ function buildSafeState(raw) {
         : {},
     settings:
       typeof src.settings === "object" && src.settings !== null
-        ? {
-            ...defaultState.settings,
-            ...src.settings,
-          }
-        : { ...defaultState.settings },
+        ? src.settings
+        : {},
   };
 }
 
-/* -------- Excel helpers (Added photoUrl column for driver) -------- */
+/* -------- Excel helpers (Added rating & photoUrl columns) -------- */
 function exportStateToExcel(anyState) {
-  const driversSheetData = anyState.drivers.map((d) => ({
+  const driversSheetData = (anyState.drivers || []).map((d) => ({
     id: d.id,
     name: d.name,
     canNight: d.canNight ? 1 : 0,
     sleepsInCab: d.sleepsInCab ? 1 : 0,
     doubleMannedEligible: d.doubleMannedEligible ? 1 : 0,
+    rating: Number.isFinite(Number(d.rating)) ? Number(d.rating) : 0, // NEW
     photoUrl: d.photoUrl || "",
   }));
-  const tractorsSheetData = anyState.tractors.map((t) => ({
+
+  const tractorsSheetData = (anyState.tractors || []).map((t) => ({
     id: t.id,
     code: t.code,
     plate: t.plate || "",
     currentLocation: t.currentLocation || "",
     doubleManned: t.doubleManned ? 1 : 0,
   }));
-  const trailersSheetData = anyState.trailers.map((t) => ({
+
+  const trailersSheetData = (anyState.trailers || []).map((t) => ({
     id: t.id,
     code: t.code,
     plate: t.plate || "",
     type: t.type || "",
   }));
-  const jobsSheetData = anyState.jobs.map((j) => ({
+
+  const jobsSheetData = (anyState.jobs || []).map((j) => ({
     id: j.id,
     date: j.date,
     start: j.start,
@@ -128,12 +135,12 @@ function exportStateToExcel(anyState) {
 function parseBool(val) {
   return val === true || val === 1 || val === "1" || val === "true";
 }
-
 function importExcelFile(file, setDraft) {
   const reader = new FileReader();
   reader.onload = (e) => {
     const data = new Uint8Array(e.target.result);
     const wb = XLSX.read(data, { type: "array" });
+
     const sheetToJSON = (name) => {
       const ws = wb.Sheets[name];
       if (!ws) return [];
@@ -146,8 +153,10 @@ function importExcelFile(file, setDraft) {
       canNight: parseBool(row.canNight),
       sleepsInCab: parseBool(row.sleepsInCab),
       doubleMannedEligible: parseBool(row.doubleMannedEligible),
+      rating: Number.isFinite(Number(row.rating)) ? Number(row.rating) : 0, // NEW
       photoUrl: row.photoUrl || "",
     }));
+
     const importedTractors = sheetToJSON("Tractors").map((row) => ({
       id: row.id || crypto.randomUUID(),
       code: row.code || "",
@@ -155,12 +164,14 @@ function importExcelFile(file, setDraft) {
       currentLocation: row.currentLocation || "",
       doubleManned: parseBool(row.doubleManned),
     }));
+
     const importedTrailers = sheetToJSON("Trailers").map((row) => ({
       id: row.id || crypto.randomUUID(),
       code: row.code || "",
       plate: row.plate || "",
       type: row.type || "",
     }));
+
     const importedJobs = sheetToJSON("Jobs").map((row) => ({
       id: row.id || `job-${crypto.randomUUID()}`,
       date: row.date || "",
@@ -183,7 +194,6 @@ function importExcelFile(file, setDraft) {
       notes: row.notes || "",
     }));
 
-    // 👇 نطبعهم برضه
     setDraft((prev) =>
       buildSafeState({
         ...prev,
@@ -223,15 +233,19 @@ export default function Admin() {
     loadState();
   }, [loadState]);
 
-  // أي حفظ من أدمن آخر (أو تحديث على السيرفر) يضرب إعادة جلب
+  // أي تحديث على السيرفر يعيد الجلب
   useServerEventRefetch(["state:updated"], loadState);
 
+  const isAdmin = user?.role === "admin";
+
+  const [saving, setSaving] = useState(false);
   const handleSaveChanges = async () => {
     try {
-      if (user?.role !== "admin") {
+      if (!isAdmin) {
         alert("Only admin can save.");
         return;
       }
+      setSaving(true);
       const saved = await apiSaveState(draft);
       const safe = buildSafeState(saved || draft);
       setServerState(safe);
@@ -240,6 +254,8 @@ export default function Admin() {
     } catch (e) {
       console.error(e);
       alert("Failed to save ❌");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -258,35 +274,35 @@ export default function Admin() {
     event.target.value = "";
   };
 
-  /* ✅ هنا بقى الأمان الحقيقي */
+  // CRUD helpers
   const addDraftItem = (type, template) => {
     const newItem = { ...template, id: crypto.randomUUID() };
     setDraft((prev) => {
       const list = Array.isArray(prev[type]) ? prev[type] : [];
-      return {
-        ...prev,
-        [type]: [...list, newItem],
-      };
+      return { ...prev, [type]: [...list, newItem] };
     });
   };
-
   const deleteDraftItem = (type, id) => {
     setDraft((prev) => {
       const list = Array.isArray(prev[type]) ? prev[type] : [];
-      return {
-        ...prev,
-        [type]: list.filter((item) => item.id === undefined || item.id !== id),
-      };
+      return { ...prev, [type]: list.filter((item) => item.id !== id) };
     });
   };
-
   const updateDraftItem = (type, id, field, value) => {
     setDraft((prev) => {
       const list = Array.isArray(prev[type]) ? prev[type] : [];
       return {
         ...prev,
         [type]: list.map((item) =>
-          item.id === id ? { ...item, [field]: value } : item
+          item.id === id
+            ? {
+                ...item,
+                [field]:
+                  field === "rating"
+                    ? Math.max(0, Math.min(5, Number(value)))
+                    : value,
+              }
+            : item
         ),
       };
     });
@@ -302,6 +318,18 @@ export default function Admin() {
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
+      {saving && (
+        <div className="fixed inset-0 z-[999] bg-white/60 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
+          <div className="w-10 h-10 rounded-full border-2 border-blue-500 border-t-transparent animate-spin"></div>
+          <p className="text-sm text-gray-700 font-medium">
+            Saving planner changes...
+          </p>
+          <p className="text-xs text-gray-400">
+            Please wait until the request finishes.
+          </p>
+        </div>
+      )}
+
       <div className="max-w-[1800px] mx-auto space-y-8">
         {/* HEADER */}
         <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -313,14 +341,7 @@ export default function Admin() {
               All data is now coming from the shared database. Draft changes do
               not affect others until you press Save.
             </p>
-            <p className="text-[11px] text-gray-400 mt-1">
-              Last loaded snapshot ID:{" "}
-              <span className="font-mono text-gray-700">
-                {JSON.stringify(serverState.updatedAt || "").slice(1, 20)}
-              </span>
-            </p>
           </div>
-
           <div className="flex flex-wrap gap-3">
             <button
               onClick={handleExportExcel}
@@ -329,7 +350,6 @@ export default function Admin() {
               <Download size={16} />
               Export Excel
             </button>
-
             <label className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors cursor-pointer text-sm font-medium">
               <Upload size={16} />
               Import Excel
@@ -340,18 +360,15 @@ export default function Admin() {
                 className="hidden"
               />
             </label>
-
             <button
               onClick={handleSaveChanges}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
-                user?.role === "admin"
+                isAdmin
                   ? "bg-orange-600 text-white hover:bg-orange-700"
                   : "bg-gray-300 text-gray-600 cursor-not-allowed"
               }`}
               title={
-                user?.role === "admin"
-                  ? "Write draft to database"
-                  : "Only admin can save"
+                isAdmin ? "Write draft to database" : "Only admin can save"
               }
             >
               <Save size={16} />
@@ -454,7 +471,7 @@ export default function Admin() {
                         <Td center>
                           <input
                             type="checkbox"
-                            checked={tractor.doubleManned}
+                            checked={!!tractor.doubleManned}
                             onChange={(e) =>
                               updateDraftItem(
                                 "tractors",
@@ -589,6 +606,7 @@ export default function Admin() {
                   canNight: true,
                   sleepsInCab: false,
                   doubleMannedEligible: true,
+                  rating: 0, // NEW default
                   photoUrl: "",
                 })
               }
@@ -602,6 +620,7 @@ export default function Admin() {
                       <Th center>Night Shift</Th>
                       <Th center>Sleeps in Cab</Th>
                       <Th center>2-man Eligible</Th>
+                      <Th center>Rating</Th> {/* NEW */}
                       <Th right>Actions</Th>
                     </tr>
                   </thead>
@@ -635,7 +654,6 @@ export default function Admin() {
 /* ----- Driver Row with Photo upload ----- */
 function DriverRow({ driver, onChange, onDelete }) {
   const inputRef = useRef(null);
-
   const initials =
     (driver.name || "")
       .trim()
@@ -652,17 +670,14 @@ function DriverRow({ driver, onChange, onDelete }) {
   ) {
     const bitmap = await createImageBitmap(file);
     const { width, height } = bitmap;
-
     const scale = Math.min(1, maxSize / Math.max(width, height));
     const w = Math.max(1, Math.round(width * scale));
     const h = Math.max(1, Math.round(height * scale));
-
     const canvas = document.createElement("canvas");
     canvas.width = w;
     canvas.height = h;
     const ctx = canvas.getContext("2d");
     ctx.drawImage(bitmap, 0, 0, w, h);
-
     return canvas.toDataURL(mime, quality);
   }
 
@@ -677,7 +692,7 @@ function DriverRow({ driver, onChange, onDelete }) {
         const dataUrl = await downscaleToDataURL(file, 256);
         onChange("photoUrl", dataUrl);
       }
-    } catch (err) {
+    } catch {
       const dataUrl = await downscaleToDataURL(file, 256);
       onChange("photoUrl", dataUrl);
     } finally {
@@ -709,14 +724,12 @@ function DriverRow({ driver, onChange, onDelete }) {
               {initials}
             </div>
           )}
-
           <button
             onClick={() => inputRef.current?.click()}
             className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border border-slate-300 hover:bg-slate-50"
             title="Upload/Change photo"
           >
-            <ImageIcon size={14} />
-            Upload
+            <ImageIcon size={14} /> Upload
           </button>
           <input
             ref={inputRef}
@@ -730,7 +743,7 @@ function DriverRow({ driver, onChange, onDelete }) {
 
       <Td>
         <input
-          value={driver.name}
+          value={driver.name || ""}
           onChange={(e) => onChange("name", e.target.value)}
           className="input-field text-xs md:text-sm"
           placeholder="Driver name..."
@@ -740,25 +753,40 @@ function DriverRow({ driver, onChange, onDelete }) {
       <Td center>
         <input
           type="checkbox"
-          checked={driver.canNight}
+          checked={!!driver.canNight}
           onChange={(e) => onChange("canNight", e.target.checked)}
           className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
         />
       </Td>
+
       <Td center>
         <input
           type="checkbox"
-          checked={driver.sleepsInCab}
+          checked={!!driver.sleepsInCab}
           onChange={(e) => onChange("sleepsInCab", e.target.checked)}
           className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
         />
       </Td>
+
       <Td center>
         <input
           type="checkbox"
-          checked={driver.doubleMannedEligible}
+          checked={!!driver.doubleMannedEligible}
           onChange={(e) => onChange("doubleMannedEligible", e.target.checked)}
           className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+        />
+      </Td>
+
+      {/* NEW: Rating */}
+      <Td center>
+        <input
+          type="number"
+          min={0}
+          max={5}
+          step={0.5}
+          value={Number.isFinite(Number(driver.rating)) ? driver.rating : 0}
+          onChange={(e) => onChange("rating", e.target.value)}
+          className="w-20 border border-gray-300 rounded-md px-2 py-1 text-xs text-center"
         />
       </Td>
 
@@ -787,7 +815,6 @@ function StatCard({ label, value, icon, color }) {
     </div>
   );
 }
-
 function SectionCard({ title, addLabel, onAdd, children }) {
   return (
     <section className="card p-6 bg-white border border-gray-200 rounded-xl shadow-sm">
@@ -797,15 +824,13 @@ function SectionCard({ title, addLabel, onAdd, children }) {
           onClick={onAdd}
           className="flex items-center gap-2 bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm"
         >
-          <Plus size={16} />
-          {addLabel}
+          <Plus size={16} /> {addLabel}
         </button>
       </div>
       {children}
     </section>
   );
 }
-
 function Th({ children, center, right }) {
   return (
     <th
@@ -817,7 +842,6 @@ function Th({ children, center, right }) {
     </th>
   );
 }
-
 function Td({ children, center, right }) {
   return (
     <td

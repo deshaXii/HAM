@@ -72,8 +72,6 @@ function DraggableResource({ resource, type, jobs, lockDateISO }) {
   const draggableId = `resource-${type}-${resource.id}`;
   const isDriver = type === "driver";
 
-  // 👇 هنا الإضافة الجديدة:
-  // لو السواق جاي من الـ state بـ weekAvailability: [] → ده معناه ممنوع يشتغل ولا يوم
   const driverNoDays =
     isDriver &&
     Array.isArray(resource.weekAvailability) &&
@@ -82,17 +80,12 @@ function DraggableResource({ resource, type, jobs, lockDateISO }) {
   const driverLocked = isDriver
     ? isDriverLockedOnDate(resource, lockDateISO)
     : false;
-
   const disabledDrag = driverNoDays || driverLocked;
 
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
       id: draggableId,
-      data: {
-        kind: "resource",
-        resourceType: type,
-        resourceId: resource.id,
-      },
+      data: { kind: "resource", resourceType: type, resourceId: resource.id },
       disabled: disabledDrag,
     });
 
@@ -124,6 +117,10 @@ function DraggableResource({ resource, type, jobs, lockDateISO }) {
     subLabel = flags.join(" • ");
   }
 
+  const rating = Number.isFinite(Number(resource?.rating))
+    ? Number(resource.rating)
+    : 0;
+
   return (
     <div
       ref={setNodeRef}
@@ -141,7 +138,6 @@ function DraggableResource({ resource, type, jobs, lockDateISO }) {
           لا يعمل هذا الأسبوع
         </div>
       )}
-
       {isDriver && lockDateISO && driverLocked && !driverNoDays && (
         <div
           className="absolute top-1 right-1 bg-red-100 text-red-600 rounded-full w-6 h-6 flex items-center justify-center text-[11px]"
@@ -179,13 +175,24 @@ function DraggableResource({ resource, type, jobs, lockDateISO }) {
             </div>
           </div>
         </div>
-        <div className="flex-shrink-0">
+
+        {/* RIGHT BADGES */}
+        <div className="flex flex-col items-end gap-1">
+          {isDriver ? (
+            <span
+              className="inline-flex items-center justify-center text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium whitespace-nowrap"
+              title="Driver rating"
+            >
+              ★ {rating.toFixed(1)}
+            </span>
+          ) : null}
+
           {jobCount > 0 ? (
-            <span className="inline-flex items-center justify-center text-[10px] px-2 py-1 rounded-full bg-blue-100 text-blue-700 font-medium whitespace-nowrap">
+            <span className="inline-flex items-center justify-center text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium whitespace-nowrap">
               {jobCount} job{jobCount === 1 ? "" : "s"}
             </span>
           ) : (
-            <span className="inline-flex items-center justify-center text-[10px] px-2 py-1 rounded-full bg-gray-100 text-gray-500 font-medium whitespace-nowrap">
+            <span className="inline-flex items-center justify-center text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium whitespace-nowrap">
               free
             </span>
           )}
