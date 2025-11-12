@@ -1,5 +1,5 @@
 const { pool } = require("../config/db");
-
+const { broadcast } = require("../realtime/sse");
 async function getNotice(req, res) {
   const [rows] = await pool.query(
     `SELECT content, updated_at, updated_by FROM notices WHERE id = 1`

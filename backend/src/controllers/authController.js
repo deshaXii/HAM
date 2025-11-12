@@ -3,22 +3,50 @@ const { hashPassword, comparePassword } = require("../utils/password");
 const { signToken } = require("../utils/jwt");
 
 async function signup(req, res) {
-  const { name, email, password } = req.body;
-  if (!name || !email || !password)
-    return res.status(400).json({ message: "name, email, password required" });
+  // تفعيل/تعطيل التسجيل من ENV
+  const allow =
+    String(process.env.ALLOW_SIGNUP || "false").toLowerCase() === "true";
+  if (!allow) {
+    return res.status(403).json({ message: "Registration is disabled" });
+  }
 
+  const { name, email, password, inviteCode } = req.body;
+
+  if (!name || !email || !password) {
+    return res.status(400).json({ message: "name, email, password required" });
+  }
+
+  // التحقق من كود الدعوة
+  const expectedInvite = (process.env.INVITE_CODE || "").trim();
+  if (expectedInvite && String(inviteCode || "").trim() !== expectedInvite) {
+    // بنرجّع 403 عشان واضح إنها سياسة منع، مش فورمات ناقص
+    return res.status(403).json({ message: "Invalid invite code" });
+  }
+
+  // فحص البريد
   const [exists] = await pool.query(`SELECT id FROM users WHERE email=?`, [
     email,
   ]);
-  if (exists.length > 0)
+  if (exists.length > 0) {
     return res.status(409).json({ message: "Email already exists" });
+  }
+
+  // (اختياري) أول مستخدم = أدمن
+  const [countRows] = await pool.query(`SELECT COUNT(*) AS c FROM users`);
+  const isFirstUser = countRows[0]?.c === 0;
 
   const password_hash = await hashPassword(password);
   const [result] = await pool.query(
-    `INSERT INTO users (name, email, password_hash) VALUES (?,?,?)`,
-    [name, email, password_hash]
+    `INSERT INTO users (name, email, password_hash, role) VALUES (?,?,?,?)`,
+    [name, email, password_hash, isFirstUser ? "admin" : "user"]
   );
-  const user = { id: result.insertId, name, email, role: "user" };
+
+  const user = {
+    id: result.insertId,
+    name,
+    email,
+    role: isFirstUser ? "admin" : "user",
+  };
   const token = signToken(user);
   return res.json({ token, user });
 }
