@@ -1,5 +1,6 @@
 import React from "react";
 import { useDraggable } from "@dnd-kit/core";
+import { labelsFor } from "../constants/trailerTaxonomy";
 
 // يرجّع كل الـ jobs اللي فيها المورد ده
 function getAssignedJobsForResource(jobs, type, resourceId) {
@@ -30,12 +31,10 @@ function initialsOf(name) {
   );
 }
 
-// نحول أي قيمة لتاريخ ISO قصير "yyyy-mm-dd"
+// ISO قصير yyyy-mm-dd
 function toShortIso(x) {
   if (!x) return "";
-  if (typeof x === "string") {
-    return x.slice(0, 10);
-  }
+  if (typeof x === "string") return x.slice(0, 10);
   try {
     return new Date(x).toISOString().slice(0, 10);
   } catch {
@@ -43,43 +42,89 @@ function toShortIso(x) {
   }
 }
 
-// هل السائق مقفول في تاريخ معيّن
+/* ---------- normalize weekAvailability (يدعم أرقام وأسماء أيام وأوبجكت) ---------- */
+const DAY_NAME_TO_NUM = {
+  sun: 0,
+  mon: 1,
+  tue: 2,
+  wed: 3,
+  thu: 4,
+  fri: 5,
+  sat: 6,
+};
+
+function normalizeWeekAvailability(wa) {
+  if (wa === null || wa === undefined) return null; // null ⇒ كل الأيام متاحة
+  if (Array.isArray(wa)) {
+    return wa
+      .map((v) => {
+        if (typeof v === "number") return v;
+        const s = String(v).toLowerCase();
+        if (DAY_NAME_TO_NUM.hasOwnProperty(s)) return DAY_NAME_TO_NUM[s];
+        const n = parseInt(s, 10);
+        return Number.isNaN(n) ? null : n;
+      })
+      .filter((x) => x !== null);
+  }
+  if (typeof wa === "object") {
+    return Object.keys(wa)
+      .filter((k) => !!wa[k])
+      .map((k) => {
+        const s = String(k).toLowerCase();
+        if (DAY_NAME_TO_NUM.hasOwnProperty(s)) return DAY_NAME_TO_NUM[s];
+        const n = parseInt(s, 10);
+        return Number.isNaN(n) ? null : n;
+      })
+      .filter((x) => x !== null);
+  }
+  return null;
+}
+
 function isDriverLockedOnDate(driver, lockDateISO) {
   if (!driver || !lockDateISO) return false;
+
   const dayIso = toShortIso(lockDateISO);
-
-  const weekAvailability = Array.isArray(driver.weekAvailability)
-    ? driver.weekAvailability
-    : [1, 2, 3, 4, 5]; // Mon-Fri لو مش موجود أصلاً
-
   const weekday = new Date(dayIso).getDay(); // 0..6
-  const canWorkThatDay = weekAvailability.includes(weekday);
 
-  // الإجازات
+  const list = normalizeWeekAvailability(driver.weekAvailability);
+  const canWorkThatDay =
+    list === null ? true : Array.isArray(list) && list.includes(weekday);
+
   const leavesArr = Array.isArray(driver.leaves)
     ? driver.leaves
     : typeof driver.leaves === "string" && driver.leaves.trim()
     ? driver.leaves.split(",").map((s) => s.trim())
     : [];
 
-  const normalizedLeaves = leavesArr.map((d) => toShortIso(d));
-  const onLeave = normalizedLeaves.includes(dayIso);
+  const onLeave = leavesArr.map((d) => toShortIso(d)).includes(dayIso);
 
   return !canWorkThatDay || onLeave;
 }
 
-function DraggableResource({ resource, type, jobs, lockDateISO }) {
+/* -------------------------------------------------------------------------------- */
+
+function DraggableResource({
+  resource,
+  type,
+  jobs,
+  lockMode = "none",
+  lockDateISO,
+}) {
   const draggableId = `resource-${type}-${resource.id}`;
   const isDriver = type === "driver";
 
+  // لا يعمل أي يوم لو الليست فاضية صراحة
+  const normAvail = normalizeWeekAvailability(resource.weekAvailability);
   const driverNoDays =
-    isDriver &&
-    Array.isArray(resource.weekAvailability) &&
-    resource.weekAvailability.length === 0;
+    isDriver && Array.isArray(normAvail) && normAvail.length === 0;
 
-  const driverLocked = isDriver
-    ? isDriverLockedOnDate(resource, lockDateISO)
-    : false;
+  // 🔒 الإقفال بالـتاريخ يُفعّل فقط في وضع اليوم
+  const shouldLockByDate = lockMode === "day" && !!lockDateISO;
+  const driverLocked =
+    isDriver && shouldLockByDate
+      ? isDriverLockedOnDate(resource, lockDateISO)
+      : false;
+
   const disabledDrag = driverNoDays || driverLocked;
 
   const { attributes, listeners, setNodeRef, transform, isDragging } =
@@ -105,10 +150,17 @@ function DraggableResource({ resource, type, jobs, lockDateISO }) {
       : resource.code || "No Code";
 
   let subLabel = "";
-  if (type === "tractor") {
+  if (type === "tractor")
     subLabel = resource.plate || resource.currentLocation || "";
-  } else if (type === "trailer") {
-    subLabel = resource.plate || resource.type || "";
+  else if (type === "trailer") {
+    const labels = labelsFor(
+      Array.isArray(resource.types)
+        ? resource.types
+        : resource.type
+        ? [resource.type]
+        : []
+    );
+    subLabel = labels.join(", ");
   } else if (type === "driver") {
     const flags = [];
     if (resource.canNight) flags.push("Night");
@@ -133,12 +185,8 @@ function DraggableResource({ resource, type, jobs, lockDateISO }) {
           : "cursor-grab hover:bg-gray-50 active:cursor-grabbing"
       } ${isDragging ? "ring-2 ring-blue-400" : ""}`}
     >
-      {isDriver && driverNoDays && (
-        <div className="absolute top-1 right-1 bg-red-100 text-red-600 rounded-full px-2 py-0.5 text-[9px]">
-          لا يعمل هذا الأسبوع
-        </div>
-      )}
-      {isDriver && lockDateISO && driverLocked && !driverNoDays && (
+      {/* يظهر الشيب فقط في وضع اليوم */}
+      {isDriver && shouldLockByDate && driverLocked && !driverNoDays && (
         <div
           className="absolute top-1 right-1 bg-red-100 text-red-600 rounded-full w-6 h-6 flex items-center justify-center text-[11px]"
           title="Driver unavailable on this day"
@@ -176,16 +224,15 @@ function DraggableResource({ resource, type, jobs, lockDateISO }) {
           </div>
         </div>
 
-        {/* RIGHT BADGES */}
         <div className="flex flex-col items-end gap-1">
-          {isDriver ? (
+          {isDriver && (
             <span
               className="inline-flex items-center justify-center text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium whitespace-nowrap"
               title="Driver rating"
             >
               ★ {rating.toFixed(1)}
             </span>
-          ) : null}
+          )}
 
           {jobCount > 0 ? (
             <span className="inline-flex items-center justify-center text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium whitespace-nowrap">
@@ -214,7 +261,8 @@ export default function ResourcePool({
   resources,
   type,
   jobs,
-  lockDateISO,
+  lockMode = "none", // "none" | "day"
+  lockDateISO, // يُستخدم فقط مع lockMode="day"
 }) {
   const safeResources = Array.isArray(resources) ? resources : [];
   return (
@@ -245,6 +293,7 @@ export default function ResourcePool({
               resource={res}
               type={type}
               jobs={jobs}
+              lockMode={lockMode}
               lockDateISO={lockDateISO}
             />
           ))}

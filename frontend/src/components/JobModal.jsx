@@ -1,4 +1,3 @@
-// src/components/JobModal.jsx
 import React, { useState, useMemo } from "react";
 import {
   X,
@@ -9,6 +8,7 @@ import {
   Package2,
   Wallet,
 } from "lucide-react";
+import { labelsFor } from "../constants/trailerTaxonomy";
 
 function toLocationNameArray(locations) {
   if (!Array.isArray(locations)) return [];
@@ -26,10 +26,8 @@ export default function JobModal({
   onSave,
   onDelete,
 }) {
-  // بنحط كل الداتا هنا بما فيها اللي هنزودها
   const [form, setForm] = useState({
     ...job,
-    // safety defaults
     driverIds: Array.isArray(job.driverIds) ? job.driverIds : [],
     revenueTrip: job.revenueTrip ?? "",
     costDriver: job.costDriver ?? "",
@@ -37,14 +35,12 @@ export default function JobModal({
     costDiesel: job.costDiesel ?? "",
   });
 
-  // آخر مكان للشاحنة (لو الأب بعته)
   const lastTractorEnd = useMemo(() => {
     return job._lastTractorEnd || null;
   }, [job]);
 
   const locationNames = toLocationNameArray(locations);
 
-  // helpers
   const set = (key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
@@ -62,7 +58,6 @@ export default function JobModal({
     });
   };
 
-  // إجمالي بسيط
   const totalCosts =
     (parseFloat(form.costDriver) || 0) +
     (parseFloat(form.costTruck) || 0) +
@@ -70,6 +65,19 @@ export default function JobModal({
 
   const profit =
     (parseFloat(form.revenueTrip) || 0) - (parseFloat(totalCosts) || 0);
+
+  // --- helper لعرض أنواع المقطورة المختارة كبادجز ---
+  const selectedTrailer = (trailers || []).find(
+    (tr) => String(tr.id) === String(form.trailerId)
+  );
+  const selectedTrailerTypes = selectedTrailer
+    ? Array.isArray(selectedTrailer.types)
+      ? selectedTrailer.types
+      : selectedTrailer.type
+      ? [selectedTrailer.type]
+      : []
+    : [];
+  const selectedTrailerLabels = labelsFor(selectedTrailerTypes);
 
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
@@ -188,12 +196,26 @@ export default function JobModal({
                     </option>
                   ))}
                 </select>
+
+                {/* 👇 badges لعرض أنواع المقطورة المختارة (خارج الـselect) */}
+                {selectedTrailerLabels.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {selectedTrailerLabels.map((lab) => (
+                      <span
+                        key={lab}
+                        className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] border border-emerald-200"
+                      >
+                        {lab}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </label>
             </div>
           </div>
 
+          {/* Drivers */}
           <div className="bg-gray-50/40 rounded-lg p-3 border border-gray-100">
-            {/* drivers multi */}
             <div>
               <span className="block text-[11px] font-medium text-gray-600 mb-1">
                 Drivers
@@ -226,7 +248,7 @@ export default function JobModal({
             </div>
           </div>
 
-          {/* === 3) route section === */}
+          {/* Route */}
           <div className="bg-gray-50/40 rounded-lg p-3 border border-gray-100">
             <h4 className="text-xs font-semibold text-gray-700 mb-3 flex items-center gap-1">
               <Package2 size={14} /> Route
@@ -300,7 +322,7 @@ export default function JobModal({
             </div>
           </div>
 
-          {/* === 4) financials === */}
+          {/* Financials */}
           <div className="bg-gray-50/40 rounded-lg p-3 border border-gray-100">
             <h4 className="text-xs font-semibold text-gray-700 mb-3 flex items-center gap-1">
               <Wallet size={14} /> Financials
@@ -356,7 +378,6 @@ export default function JobModal({
               </label>
             </div>
 
-            {/* mini summary */}
             <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
               <div className="px-3 py-2 rounded bg-white border text-gray-700">
                 Total costs:{" "}

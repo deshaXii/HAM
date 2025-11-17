@@ -1,5 +1,4 @@
-// src/components/AdminDriverSchedule.jsx
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useAuth } from "../contexts/AuthContext";
 
 const DAYS = [
@@ -12,7 +11,7 @@ const DAYS = [
   { label: "Sun", val: 0 },
 ];
 
-// helpers
+// ===== Helpers =====
 function initialsOf(name) {
   return (
     (name || "")
@@ -24,55 +23,83 @@ function initialsOf(name) {
   );
 }
 
-/*
-props:
-- drivers: state.drivers
-- onSaveDrivers(nextDriversArray): function
+function toISO(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
+
+function parseISO(s) {
+  const [y, m, d] = String(s)
+    .split("-")
+    .map((n) => parseInt(n, 10));
+  return new Date(y, (m || 1) - 1, d || 1, 0, 0, 0, 0);
+}
+
+function datesBetween(fromISO, toISOstr) {
+  if (!fromISO || !toISOstr) return [];
+  let start = parseISO(fromISO);
+  let end = parseISO(toISOstr);
+  if (isNaN(start) || isNaN(end)) return [];
+
+  // لو المستخدم اخترعكس: From > To، نبدّلهم
+  if (start.getTime() > end.getTime()) {
+    const tmp = start;
+    start = end;
+    end = tmp;
+  }
+
+  const out = [];
+  const cur = new Date(start);
+  cur.setHours(0, 0, 0, 0);
+  const last = new Date(end);
+  last.setHours(0, 0, 0, 0);
+
+  while (cur.getTime() <= last.getTime()) {
+    out.push(toISO(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return out;
+}
+
+// ===== Component =====
+/* props:
+  - drivers: state.drivers
+  - onSaveDrivers(nextDriversArray): function
 */
 export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
 
-  // normalize each driver
-  const [local, setLocal] = useState(
-    (drivers || []).map((d) => ({
-      id: d.id,
-      name: d.name || "",
-      code: d.code || "",
-      photoUrl: d.photoUrl || "",
-      // flags
-      canNight: !!d.canNight,
-      sleepsInCab: !!d.sleepsInCab,
-      doubleMannedEligible: !!d.doubleMannedEligible,
-      // NEW: rating (default 0)
-      rating: Number.isFinite(Number(d.rating)) ? Number(d.rating) : 0,
-      // week/leave
-      weekAvailability: Array.isArray(d.weekAvailability)
-        ? d.weekAvailability
-        : [1, 2, 3, 4, 5],
-      leaves: Array.isArray(d.leaves) ? d.leaves : [],
-    }))
+  // ✅ Normalize drivers + اجعل الافتراضي كل الأيام [0..6]
+  const normalized = useMemo(
+    () =>
+      (drivers || []).map((d) => ({
+        id: d.id,
+        name: d.name || "",
+        code: d.code || "",
+        photoUrl: d.photoUrl || "",
+        canNight: !!d.canNight,
+        sleepsInCab: !!d.sleepsInCab,
+        doubleMannedEligible: !!d.doubleMannedEligible,
+        weekAvailability: Array.isArray(d.weekAvailability)
+          ? d.weekAvailability
+          : [0, 1, 2, 3, 4, 5, 6],
+        leaves: Array.isArray(d.leaves) ? d.leaves : [],
+      })),
+    [drivers]
   );
+
+  const [local, setLocal] = useState(normalized);
+  const [rangeFrom, setRangeFrom] = useState("");
+  const [rangeTo, setRangeTo] = useState("");
 
   if (!isAdmin) {
     return (
       <div className="p-4 text-sm text-gray-500">
         Only admin can edit driver schedules.
       </div>
-    );
-  }
-
-  function clampRating(n) {
-    const x = Number(n);
-    if (!Number.isFinite(x)) return 0;
-    return Math.max(0, Math.min(5, x));
-  }
-
-  function setRating(driverId, value) {
-    setLocal((prev) =>
-      prev.map((drv) =>
-        drv.id === driverId ? { ...drv, rating: clampRating(value) } : drv
-      )
     );
   }
 
@@ -99,18 +126,39 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
     );
   }
 
-  function updateLeaves(driverId, value) {
-    const dates = value
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean);
+  function addLeaveRange(driverId) {
+    const list = datesBetween(rangeFrom, rangeTo);
+    if (!list.length) return;
+
     setLocal((prev) =>
-      prev.map((drv) => (drv.id === driverId ? { ...drv, leaves: dates } : drv))
+      prev.map((drv) =>
+        drv.id === driverId
+          ? {
+              ...drv,
+              // دمج + إزالة تكرار + ترتيب
+              leaves: Array.from(
+                new Set([...(drv.leaves || []), ...list])
+              ).sort(),
+            }
+          : drv
+      )
+    );
+    setRangeFrom("");
+    setRangeTo("");
+  }
+
+  function removeLeaveDate(driverId, dateISO) {
+    setLocal((prev) =>
+      prev.map((drv) =>
+        drv.id === driverId
+          ? { ...drv, leaves: (drv.leaves || []).filter((d) => d !== dateISO) }
+          : drv
+      )
     );
   }
 
   function saveAll() {
-    const normalized = local.map((d) => ({
+    const normalizedOut = local.map((d) => ({
       id: d.id,
       name: d.name,
       code: d.code,
@@ -118,14 +166,12 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
       canNight: !!d.canNight,
       sleepsInCab: !!d.sleepsInCab,
       doubleMannedEligible: !!d.doubleMannedEligible,
-      // NEW: include rating
-      rating: clampRating(d.rating),
       weekAvailability: Array.isArray(d.weekAvailability)
         ? d.weekAvailability.slice().sort()
-        : [],
-      leaves: Array.isArray(d.leaves) ? d.leaves : [],
+        : [0, 1, 2, 3, 4, 5, 6],
+      leaves: Array.isArray(d.leaves) ? d.leaves.slice().sort() : [],
     }));
-    onSaveDrivers && onSaveDrivers(normalized);
+    onSaveDrivers && onSaveDrivers(normalizedOut);
   }
 
   return (
@@ -172,7 +218,7 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
                   <div className="text-gray-900 font-semibold text-sm truncate">
                     {drv.name || "(no name)"}{" "}
                     <span className="text-gray-500 font-normal">
-                      {drv.code ? ` • ${drv.code}` : ""}
+                      {drv.code ? `• ${drv.code}` : ""}
                     </span>
                   </div>
                   <div className="text-[11px] text-gray-500 truncate">
@@ -206,20 +252,6 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
                   />
                   <span className="text-gray-700">2-man eligible</span>
                 </label>
-
-                {/* NEW: rating input */}
-                <label className="flex items-center gap-2 select-none">
-                  <span className="text-gray-700">Rating</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={5}
-                    step={0.5}
-                    value={drv.rating}
-                    onChange={(e) => setRating(drv.id, e.target.value)}
-                    className="w-20 border border-gray-300 rounded-md px-2 py-1 text-xs"
-                  />
-                </label>
               </div>
             </div>
 
@@ -249,28 +281,75 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
               </div>
             </div>
 
-            {/* leaves */}
+            {/* leave range */}
             <div className="mb-4">
               <div className="text-xs font-medium text-gray-800 mb-2">
-                Leave days (comma-separated ISO dates):
+                Leave days:
               </div>
-              <textarea
-                className="w-full border border-gray-300 rounded-lg text-xs p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                value={drv.leaves.join(", ")}
-                rows={2}
-                onChange={(e) => updateLeaves(drv.id, e.target.value)}
-                placeholder="2025-12-04, 2025-12-05"
-              />
-              <div className="text-[11px] text-gray-500 mt-1">
-                These days are completely blocked for this driver.
+
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="flex flex-col">
+                  <label className="text-[11px] text-gray-500 mb-1">From</label>
+                  <input
+                    type="date"
+                    className="border border-gray-300 rounded-lg text-xs p-2"
+                    value={rangeFrom}
+                    onChange={(e) => setRangeFrom(e.target.value)}
+                  />
+                </div>
+                <div className="flex flex-col">
+                  <label className="text-[11px] text-gray-500 mb-1">To</label>
+                  <input
+                    type="date"
+                    className="border border-gray-300 rounded-lg text-xs p-2"
+                    value={rangeTo}
+                    onChange={(e) => setRangeTo(e.target.value)}
+                  />
+                </div>
+                <button
+                  onClick={() => addLeaveRange(drv.id)}
+                  className="bg-gray-800 text-white text-xs font-medium px-3 py-2 rounded-lg"
+                >
+                  Add Range
+                </button>
+              </div>
+
+              {/* chips of leaves */}
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(drv.leaves || []).length === 0 ? (
+                  <span className="text-[11px] text-gray-400">
+                    No leave days
+                  </span>
+                ) : (
+                  (drv.leaves || []).map((d) => (
+                    <span
+                      key={d}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-red-50 text-red-700 border border-red-200 text-[11px]"
+                    >
+                      {d}
+                      <button
+                        onClick={() => removeLeaveDate(drv.id, d)}
+                        className="text-red-600 hover:text-red-800"
+                        title="Remove date"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))
+                )}
+              </div>
+
+              <div className="text-[11px] text-gray-500 mt-2">
+                Select a date range (From → To). All days in the range will be
+                blocked.
               </div>
             </div>
 
             <div className="text-[11px] text-gray-500 border-t pt-2">
-              - Night shift OK = can be used in night jobs. <br />- Sleeps in
-              cab = can do overnight trips requiring cab. <br />- 2-man eligible
-              = driver can be on double-manned jobs (tractor must allow double
-              man too).
+              - Night shift OK = can be used in night jobs. <br />
+              - Sleeps in cab = can do overnight trips requiring cab. <br />-
+              2-man eligible = driver can be on double-manned jobs (tractor must
+              allow double man too).
             </div>
           </div>
         ))}

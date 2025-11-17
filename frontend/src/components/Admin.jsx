@@ -1,6 +1,8 @@
-// src/pages/Admin.jsx
-import React, { useState, useEffect, useRef, useCallback } from "react";
+// front/src/components/Admin.jsx
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import useServerEventRefetch from "../hooks/useServerEventRefetch";
+import MultiTypeSelect from "./MultiTypeSelect";
+import { TRAILER_TAXONOMY } from "../constants/trailerTaxonomy";
 import {
   Plus,
   Trash2,
@@ -10,15 +12,15 @@ import {
   Truck,
   MapPin,
   Users,
-  Image as ImageIcon,
   X,
+  ImageIcon,
 } from "lucide-react";
 import AdminExtras from "./AdminExtras";
 import { useAuth } from "../contexts/AuthContext";
 import { apiGetState, apiSaveState, apiUploadDriverPhoto } from "../lib/api";
 import * as XLSX from "xlsx";
 
-/* ========== DEFAULT STATE ========== */
+// ========== DEFAULT STATE ==========
 const defaultState = {
   drivers: [],
   tractors: [],
@@ -34,21 +36,21 @@ const defaultState = {
   ],
   distanceKm: {},
 };
-
-/* ✅ تطبيع: تأمين الحقول وإضافة rating للسائقين */
+function normalizeTrailers(list) {
+  return (Array.isArray(list) ? list : []).map((t) => ({
+    ...t,
+    // دعم خلفي: لو كان فيه t.type قديم نحوله لمصفوفة
+    types: Array.isArray(t.types) ? t.types : t.type ? [t.type] : [],
+  }));
+}
 function buildSafeState(raw) {
   const src = raw || {};
   return {
     ...defaultState,
     ...src,
-    drivers: Array.isArray(src.drivers)
-      ? src.drivers.map((d) => ({
-          ...d,
-          rating: Number.isFinite(Number(d?.rating)) ? Number(d.rating) : 0,
-        }))
-      : [],
+    drivers: Array.isArray(src.drivers) ? src.drivers : [],
     tractors: Array.isArray(src.tractors) ? src.tractors : [],
-    trailers: Array.isArray(src.trailers) ? src.trailers : [],
+    trailers: normalizeTrailers(src.trailers),
     jobs: Array.isArray(src.jobs) ? src.jobs : [],
     locations: Array.isArray(src.locations)
       ? src.locations
@@ -59,39 +61,35 @@ function buildSafeState(raw) {
         : {},
     settings:
       typeof src.settings === "object" && src.settings !== null
-        ? src.settings
-        : {},
+        ? { ...defaultState.settings, ...src.settings }
+        : { ...defaultState.settings },
   };
 }
 
-/* -------- Excel helpers (Added rating & photoUrl columns) -------- */
+// Excel helpers (unchanged except we keep photoUrl)
 function exportStateToExcel(anyState) {
-  const driversSheetData = (anyState.drivers || []).map((d) => ({
+  const driversSheetData = anyState.drivers.map((d) => ({
     id: d.id,
     name: d.name,
     canNight: d.canNight ? 1 : 0,
     sleepsInCab: d.sleepsInCab ? 1 : 0,
     doubleMannedEligible: d.doubleMannedEligible ? 1 : 0,
-    rating: Number.isFinite(Number(d.rating)) ? Number(d.rating) : 0, // NEW
     photoUrl: d.photoUrl || "",
   }));
-
-  const tractorsSheetData = (anyState.tractors || []).map((t) => ({
+  const tractorsSheetData = anyState.tractors.map((t) => ({
     id: t.id,
     code: t.code,
     plate: t.plate || "",
     currentLocation: t.currentLocation || "",
     doubleManned: t.doubleManned ? 1 : 0,
   }));
-
-  const trailersSheetData = (anyState.trailers || []).map((t) => ({
+  const trailersSheetData = anyState.trailers.map((t) => ({
     id: t.id,
     code: t.code,
     plate: t.plate || "",
-    type: t.type || "",
+    types: Array.isArray(t.types) ? t.types.join(",") : "",
   }));
-
-  const jobsSheetData = (anyState.jobs || []).map((j) => ({
+  const jobsSheetData = anyState.jobs.map((j) => ({
     id: j.id,
     date: j.date,
     start: j.start,
@@ -107,7 +105,6 @@ function exportStateToExcel(anyState) {
     driverIds: Array.isArray(j.driverIds) ? j.driverIds.join(",") : "",
     notes: j.notes || "",
   }));
-
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(
     wb,
@@ -135,28 +132,28 @@ function exportStateToExcel(anyState) {
 function parseBool(val) {
   return val === true || val === 1 || val === "1" || val === "true";
 }
+
 function importExcelFile(file, setDraft) {
   const reader = new FileReader();
   reader.onload = (e) => {
     const data = new Uint8Array(e.target.result);
     const wb = XLSX.read(data, { type: "array" });
-
     const sheetToJSON = (name) => {
       const ws = wb.Sheets[name];
       if (!ws) return [];
       return XLSX.utils.sheet_to_json(ws, { defval: "" });
     };
-
     const importedDrivers = sheetToJSON("Drivers").map((row) => ({
       id: row.id || crypto.randomUUID(),
       name: row.name || "",
       canNight: parseBool(row.canNight),
       sleepsInCab: parseBool(row.sleepsInCab),
       doubleMannedEligible: parseBool(row.doubleMannedEligible),
-      rating: Number.isFinite(Number(row.rating)) ? Number(row.rating) : 0, // NEW
       photoUrl: row.photoUrl || "",
+      // 🔸 لو مش موجودة في الإكسل، خليه كل الأيام
+      weekAvailability: [0, 1, 2, 3, 4, 5, 6],
+      leaves: [],
     }));
-
     const importedTractors = sheetToJSON("Tractors").map((row) => ({
       id: row.id || crypto.randomUUID(),
       code: row.code || "",
@@ -164,14 +161,12 @@ function importExcelFile(file, setDraft) {
       currentLocation: row.currentLocation || "",
       doubleManned: parseBool(row.doubleManned),
     }));
-
     const importedTrailers = sheetToJSON("Trailers").map((row) => ({
       id: row.id || crypto.randomUUID(),
       code: row.code || "",
       plate: row.plate || "",
       type: row.type || "",
     }));
-
     const importedJobs = sheetToJSON("Jobs").map((row) => ({
       id: row.id || `job-${crypto.randomUUID()}`,
       date: row.date || "",
@@ -193,7 +188,6 @@ function importExcelFile(file, setDraft) {
           : [],
       notes: row.notes || "",
     }));
-
     setDraft((prev) =>
       buildSafeState({
         ...prev,
@@ -207,12 +201,15 @@ function importExcelFile(file, setDraft) {
   reader.readAsArrayBuffer(file);
 }
 
-/* ---------------- Component ---------------- */
 export default function Admin() {
   const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [serverState, setServerState] = useState(defaultState);
   const [draft, setDraft] = useState(defaultState);
   const [loading, setLoading] = useState(true);
+
+  const savingRef = useRef(false);
+  const latestDraftRef = useRef(defaultState);
 
   const loadState = useCallback(async () => {
     try {
@@ -220,10 +217,12 @@ export default function Admin() {
       const safe = buildSafeState(apiState);
       setServerState(safe);
       setDraft(safe);
+      latestDraftRef.current = safe;
     } catch {
       const safe = buildSafeState(null);
       setServerState(safe);
       setDraft(safe);
+      latestDraftRef.current = safe;
     } finally {
       setLoading(false);
     }
@@ -233,33 +232,46 @@ export default function Admin() {
     loadState();
   }, [loadState]);
 
-  // أي تحديث على السيرفر يعيد الجلب
   useServerEventRefetch(["state:updated"], loadState);
 
-  const isAdmin = user?.role === "admin";
-
-  const [saving, setSaving] = useState(false);
-  const handleSaveChanges = async () => {
+  async function handleSaveChanges(next, silent = false) {
+    if (!isAdmin) return;
+    if (savingRef.current) return;
+    savingRef.current = true;
     try {
-      if (!isAdmin) {
-        alert("Only admin can save.");
-        return;
-      }
-      setSaving(true);
-      const saved = await apiSaveState(draft);
-      const safe = buildSafeState(saved || draft);
+      const saved = await apiSaveState(next);
+      const safe = buildSafeState(saved || next);
       setServerState(safe);
       setDraft(safe);
-      alert("Saved to database ✅");
+      latestDraftRef.current = safe;
+      if (!silent) alert("Saved to database ✅");
     } catch (e) {
       console.error(e);
-      alert("Failed to save ❌");
+      if (!silent) alert("Failed to save ❌");
     } finally {
-      setSaving(false);
+      savingRef.current = false;
     }
-  };
+  }
+
+  // Auto-Save كل 10 ثواني
+  useEffect(() => {
+    if (!isAdmin) return;
+    const id = setInterval(() => {
+      handleSaveChanges(latestDraftRef.current, true);
+    }, 10000);
+    return () => clearInterval(id);
+  }, [isAdmin]);
+
+  // حفظ قبل الخروج
+  useEffect(() => {
+    if (!isAdmin) return;
+    const h = () => handleSaveChanges(latestDraftRef.current, true);
+    window.addEventListener("beforeunload", h);
+    return () => window.removeEventListener("beforeunload", h);
+  }, [isAdmin]);
 
   const handleExportExcel = () => exportStateToExcel(draft);
+
   const handleFileImport = (event) => {
     const file = event.target.files[0];
     if (file) {
@@ -274,37 +286,36 @@ export default function Admin() {
     event.target.value = "";
   };
 
-  // CRUD helpers
   const addDraftItem = (type, template) => {
     const newItem = { ...template, id: crypto.randomUUID() };
     setDraft((prev) => {
       const list = Array.isArray(prev[type]) ? prev[type] : [];
-      return { ...prev, [type]: [...list, newItem] };
+      const next = { ...prev, [type]: [...list, newItem] };
+      latestDraftRef.current = next;
+      return next;
     });
   };
+
   const deleteDraftItem = (type, id) => {
     setDraft((prev) => {
       const list = Array.isArray(prev[type]) ? prev[type] : [];
-      return { ...prev, [type]: list.filter((item) => item.id !== id) };
+      const next = { ...prev, [type]: list.filter((item) => item.id !== id) };
+      latestDraftRef.current = next;
+      return next;
     });
   };
+
   const updateDraftItem = (type, id, field, value) => {
     setDraft((prev) => {
       const list = Array.isArray(prev[type]) ? prev[type] : [];
-      return {
+      const next = {
         ...prev,
         [type]: list.map((item) =>
-          item.id === id
-            ? {
-                ...item,
-                [field]:
-                  field === "rating"
-                    ? Math.max(0, Math.min(5, Number(value)))
-                    : value,
-              }
-            : item
+          item.id === id ? { ...item, [field]: value } : item
         ),
       };
+      latestDraftRef.current = next;
+      return next;
     });
   };
 
@@ -318,28 +329,15 @@ export default function Admin() {
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
-      {saving && (
-        <div className="fixed inset-0 z-[999] bg-white/60 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
-          <div className="w-10 h-10 rounded-full border-2 border-blue-500 border-t-transparent animate-spin"></div>
-          <p className="text-sm text-gray-700 font-medium">
-            Saving planner changes...
-          </p>
-          <p className="text-xs text-gray-400">
-            Please wait until the request finishes.
-          </p>
-        </div>
-      )}
-
       <div className="max-w-[1800px] mx-auto space-y-8">
         {/* HEADER */}
         <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">
-              Admin Dashboard
-            </h1>
+            {/* 👇 العنوان */}
+            <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
             <p className="text-gray-600 text-sm mt-1">
-              All data is now coming from the shared database. Draft changes do
-              not affect others until you press Save.
+              All data is now coming from the shared database. Draft changes
+              auto-save every 10s.
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
@@ -347,12 +345,11 @@ export default function Admin() {
               onClick={handleExportExcel}
               className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
             >
-              <Download size={16} />
-              Export Excel
+              <Download size={16} /> Export Excel
             </button>
+
             <label className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors cursor-pointer text-sm font-medium">
-              <Upload size={16} />
-              Import Excel
+              <Upload size={16} /> Import Excel
               <input
                 type="file"
                 accept=".xlsx,.xls"
@@ -360,20 +357,6 @@ export default function Admin() {
                 className="hidden"
               />
             </label>
-            <button
-              onClick={handleSaveChanges}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
-                isAdmin
-                  ? "bg-orange-600 text-white hover:bg-orange-700"
-                  : "bg-gray-300 text-gray-600 cursor-not-allowed"
-              }`}
-              title={
-                isAdmin ? "Write draft to database" : "Only admin can save"
-              }
-            >
-              <Save size={16} />
-              Save Changes
-            </button>
           </div>
         </div>
 
@@ -382,31 +365,19 @@ export default function Admin() {
           <StatCard
             label="Tractors"
             value={draft?.tractors?.length}
-            icon={<Truck className="h-5 w-5 text-blue-600" />}
-            color="bg-blue-100"
+            icon="🚚"
           />
-          <StatCard
-            label="Trailers"
-            value={draft?.trailers?.length}
-            icon={<MapPin className="h-5 w-5 text-green-600" />}
-            color="bg-green-100"
-          />
-          <StatCard
-            label="Drivers"
-            value={draft?.drivers?.length}
-            icon={<Users className="h-5 w-5 text-purple-600" />}
-            color="bg-purple-100"
-          />
+          <StatCard label="Trailers" value={draft?.trailers?.length} icon="🛞" />
+          <StatCard label="Drivers" value={draft?.drivers?.length} icon="👤" />
           <StatCard
             label="Planned Tasks"
             value={draft?.jobs?.length}
-            icon={<Save className="h-5 w-5 text-orange-600" />}
-            color="bg-orange-100"
+            icon="📝"
           />
         </div>
 
         {/* LAYOUT */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid  gap-6">
           {/* LEFT 2/3 */}
           <div className="space-y-6 lg:col-span-2">
             {/* TRACTORS */}
@@ -519,12 +490,12 @@ export default function Admin() {
                     <tr>
                       <Th>Code</Th>
                       <Th>Plate</Th>
-                      <Th>Type</Th>
+                      <Th>Type(s)</Th>
                       <Th right>Actions</Th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {(draft?.trailers || []).map((trailer) => (
+                    {(draft.trailers || []).map((trailer) => (
                       <tr
                         key={trailer.id}
                         className="hover:bg-gray-50 transition-colors"
@@ -560,23 +531,20 @@ export default function Admin() {
                           />
                         </Td>
                         <Td>
-                          <select
-                            value={trailer.type}
-                            onChange={(e) =>
+                          <MultiTypeSelect
+                            taxonomy={TRAILER_TAXONOMY}
+                            value={
+                              Array.isArray(trailer.types) ? trailer.types : []
+                            }
+                            onChange={(vals) =>
                               updateDraftItem(
                                 "trailers",
                                 trailer.id,
-                                "type",
-                                e.target.value
+                                "types",
+                                vals
                               )
                             }
-                            className="input-field text-xs md:text-sm"
-                          >
-                            <option value="reefer">Reefer</option>
-                            <option value="box">Box</option>
-                            <option value="taut">Taut</option>
-                            <option value="chassis">Chassis</option>
-                          </select>
+                          />
                         </Td>
                         <Td right>
                           <button
@@ -606,8 +574,10 @@ export default function Admin() {
                   canNight: true,
                   sleepsInCab: false,
                   doubleMannedEligible: true,
-                  rating: 0, // NEW default
                   photoUrl: "",
+                  // 👇 افتراضي كل الأيام
+                  weekAvailability: [0, 1, 2, 3, 4, 5, 6],
+                  leaves: [],
                 })
               }
             >
@@ -642,9 +612,7 @@ export default function Admin() {
           </div>
 
           {/* RIGHT PANEL */}
-          <div className="space-y-6">
-            <AdminExtras />
-          </div>
+          <div className="space-y-6"></div>
         </div>
       </div>
     </div>
@@ -661,7 +629,6 @@ function DriverRow({ driver, onChange, onDelete }) {
       .slice(0, 2)
       .map((w) => w[0]?.toUpperCase())
       .join("") || "?";
-
   async function downscaleToDataURL(
     file,
     maxSize = 256,
@@ -699,7 +666,6 @@ function DriverRow({ driver, onChange, onDelete }) {
       e.target.value = "";
     }
   }
-
   return (
     <tr className="hover:bg-gray-50 transition-colors">
       <Td>

@@ -525,101 +525,146 @@ function AdminTasksPanel() {
       </div>
 
       {/* Tasks table */}
-      <div className="overflow-x-auto max-h-[260px] border border-slate-200 rounded-lg">
-        <table className="w-full text-left text-xs text-slate-700">
-          <thead className="text-[11px] uppercase text-slate-400 bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
+      <div className="overflow-x-auto max-h-[380px] border border-slate-200 rounded-xl shadow-sm">
+        <table className="w-full text-left text-[13px] text-slate-700">
+          <thead className="text-[11px] uppercase tracking-wide text-slate-500 bg-slate-50/80 backdrop-blur border-b border-slate-200 sticky top-0 z-10">
             <tr>
-              <th className="py-2 px-3 font-semibold">User</th>
-              <th className="py-2 px-3 font-semibold">Task Title</th>
-              <th className="py-2 px-3 font-semibold">Items</th>
-              <th className="py-2 px-3 font-semibold w-16 text-center">
+              <th className="py-2.5 px-3 font-semibold">User</th>
+              <th className="py-2.5 px-3 font-semibold">Task Title</th>
+              <th className="py-2.5 px-3 font-semibold w-[48%]">Items</th>
+              <th className="py-2.5 px-3 font-semibold w-16 text-center">
                 Delete
               </th>
             </tr>
           </thead>
 
           <tbody>
-            {tasks.map((t) => (
-              <tr
-                key={t.id}
-                className="border-b border-slate-100 align-top last:border-b-0"
-              >
-                <td className="py-2 px-3 text-[12px] text-slate-600 min-w-[140px]">
-                  <div className="font-medium text-slate-800 text-[13px]">
-                    {t.user?.name || "—"}
-                  </div>
-                  <div className="text-[11px] text-slate-400 break-all">
-                    {t.user?.email}
-                  </div>
-                  <div className="text-[10px] text-slate-400">
-                    {t.user?.role}
-                  </div>
-                </td>
+            {tasks.map((t) => {
+              const total = Array.isArray(t.items) ? t.items.length : 0;
+              const done = total ? t.items.filter((x) => x.done).length : 0;
+              const pct = total ? Math.round((done / total) * 100) : 0;
 
-                <td className="py-2 px-3 min-w-[200px]">
-                  <EditableTitle
-                    initialValue={t.title}
-                    onSave={(val) => updateTaskTitle(t.id, val)}
-                  />
-                  <div className="text-[10px] text-slate-400">
-                    {t.createdAt ? new Date(t.createdAt).toLocaleString() : ""}
-                  </div>
-                </td>
+              return (
+                <tr
+                  key={t.id}
+                  className="border-b border-slate-100 align-top last:border-b-0 hover:bg-slate-50/40"
+                >
+                  {/* User */}
+                  <td className="py-3 px-3 text-[12px] text-slate-600 min-w-[180px]">
+                    <div className="font-medium text-slate-900 text-[13px] leading-tight">
+                      {t.user?.name || "—"}
+                    </div>
+                    <div className="text-[11px] text-slate-500 break-all leading-tight">
+                      {t.user?.email || ""}
+                    </div>
+                    <div className="mt-0.5 inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                      {t.user?.role || "user"}
+                    </div>
+                  </td>
 
-                <td className="py-2 px-3">
-                  <div className="flex flex-col gap-1">
-                    {t.items.map((it) => (
-                      <div
-                        key={it.id}
-                        className="flex items-start gap-2 text-[12px]"
-                      >
-                        <input
-                          type="checkbox"
-                          className="h-3.5 w-3.5 accent-emerald-600 mt-0.5"
-                          checked={it.done}
-                          onChange={() => toggleItemDone(it.id, it.done)}
-                        />
+                  {/* Title */}
+                  <td className="py-3 px-3 min-w-[240px]">
+                    <div className="mb-1">
+                      <EditableTitle
+                        initialValue={t.title}
+                        onSave={(val) => updateTaskTitle(t.id, val)}
+                      />
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                      {t.createdAt
+                        ? new Date(t.createdAt).toLocaleString()
+                        : ""}
+                    </div>
+                  </td>
+
+                  {/* Items */}
+                  <td className="py-3 px-3">
+                    {/* Summary bar */}
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <div className="text-[11px] text-slate-500">
+                        <span className="font-medium text-slate-700">
+                          {done}
+                        </span>{" "}
+                        / {total} done
+                      </div>
+                      <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                         <div
-                          className={`flex-1 ${
-                            it.done
-                              ? "line-through text-slate-400"
-                              : "text-slate-700"
-                          }`}
-                        >
-                          {it.text}
-                        </div>
-                        <button
-                          onClick={() => removeItem(it.id)}
-                          className="text-[10px] text-red-500 hover:text-red-700"
-                          title="Remove item"
-                        >
-                          ✕
-                        </button>
+                          className="h-full bg-emerald-500 rounded-full transition-all"
+                          style={{ width: `${pct}%` }}
+                          aria-label={`Progress ${pct}%`}
+                        />
                       </div>
-                    ))}
-                    {t.items.length === 0 && (
-                      <div className="text-[11px] text-slate-400 italic">
-                        (no items)
+                      <div className="text-[11px] w-10 text-right text-slate-500">
+                        {pct}%
                       </div>
-                    )}
-                  </div>
-                </td>
+                    </div>
 
-                <td className="py-2 px-3 text-center align-top">
-                  <button
-                    onClick={() => deleteTask(t.id)}
-                    className="text-[11px] text-red-600 hover:text-red-800 font-semibold"
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
+                    <div className="flex flex-col gap-1.5">
+                      {total > 0 ? (
+                        t.items.map((it) => (
+                          <div
+                            key={it.id}
+                            className="group flex items-start gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 hover:border-slate-300"
+                          >
+                            <input
+                              type="checkbox"
+                              className="mt-0.5 h-4 w-4 accent-emerald-600"
+                              checked={!!it.done}
+                              onChange={() => toggleItemDone(it.id, it.done)}
+                              title={
+                                it.done ? "Mark as not done" : "Mark as done"
+                              }
+                            />
+                            <div
+                              className={
+                                "flex-1 whitespace-pre-wrap break-words leading-snug " +
+                                (it.done
+                                  ? "line-through text-slate-400"
+                                  : "text-slate-800")
+                              }
+                              title={(it.text || "").trim() || "(no text)"}
+                            >
+                              {(it.text || "").trim() || (
+                                <span className="italic text-slate-400">
+                                  (no text)
+                                </span>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => removeItem(it.id)}
+                              className="text-[11px] text-red-500 hover:text-red-700 opacity-70 hover:opacity-100"
+                              title="Remove item"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-[12px] text-slate-400 italic">
+                          (no items)
+                        </div>
+                      )}
+                    </div>
+                  </td>
+
+                  {/* Delete Task */}
+                  <td className="py-3 px-3 text-center align-top">
+                    <button
+                      onClick={() => deleteTask(t.id)}
+                      className="inline-flex items-center justify-center rounded-md border border-red-200 px-2 py-1 text-[11px] font-semibold text-red-600 hover:bg-red-50 hover:border-red-300"
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+
             {tasks.length === 0 && !loading && (
               <tr>
                 <td
                   colSpan={4}
-                  className="py-4 px-3 text-center text-[12px] text-slate-400"
+                  className="py-6 px-3 text-center text-[12px] text-slate-400"
                 >
                   No tasks yet.
                 </td>

@@ -7,6 +7,7 @@ import {
   Link,
   useLocation,
 } from "react-router-dom";
+import TasksAndNotices from "./components/TasksAndNotices";
 
 import Admin from "./components/Admin";
 import Login from "./components/Login";
@@ -19,7 +20,14 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import AdminRoute from "./components/AdminRoute";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Agenda from "./components/Agenda";
-import { Truck, Users, CalendarDays, Printer, MapPin } from "lucide-react";
+import {
+  Truck,
+  Users,
+  CalendarDays,
+  Printer,
+  MapPin,
+  ListChecks,
+} from "lucide-react";
 import AdminDriversPage from "./components/Drivers";
 import LocationsMap from "./components/LocationsMap"; // <<< NEW
 
@@ -30,16 +38,23 @@ function Navigation() {
 
   const navItems = [
     {
-      path: "/admin",
+      path: "/dashboard",
       icon: Users,
-      label: "Admin",
+      label: "Dashboard",
       role: "admin",
       color: "text-purple-600",
     },
     {
-      path: "/admin/drivers",
+      path: "/dashboard/drivers",
       icon: Users,
       label: "Drivers",
+      role: "admin",
+      color: "text-purple-600",
+    },
+    {
+      path: "/tasks",
+      icon: ListChecks,
+      label: "Tasks & Notices",
       role: "admin",
       color: "text-purple-600",
     },
@@ -212,7 +227,7 @@ function AppInner() {
             />
 
             <Route
-              path="/admin"
+              path="/dashboard"
               element={
                 <AdminRoute>
                   <Admin />
@@ -220,7 +235,7 @@ function AppInner() {
               }
             />
             <Route
-              path="/admin/drivers"
+              path="/dashboard/drivers"
               element={
                 <AdminRoute>
                   <AdminDriversPage />
@@ -243,6 +258,7 @@ function AppInner() {
                 </ProtectedRoute>
               }
             />
+            <Route path="/tasks" element={<TasksAndNotices />} />
           </Routes>
         </main>
       </div>

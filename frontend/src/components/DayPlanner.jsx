@@ -62,7 +62,7 @@ function resolveResourceId(maybeId, list) {
   const exact = list.find((r) => r.id === maybeId);
   if (exact) return maybeId;
 
-  // legacy prefix (old short ids)
+  // legacy prefix
   const byPrefix = list.find(
     (r) => typeof r.id === "string" && r.id.startsWith(String(maybeId))
   );
@@ -119,7 +119,7 @@ function normalizeStateFromApi(apiState) {
   };
 }
 
-/* ===== driver availability ===== */
+/* ===== driver availability (موحّد مع Planner) ===== */
 const DAY_NAME_TO_NUM = {
   sun: 0,
   mon: 1,
@@ -130,8 +130,12 @@ const DAY_NAME_TO_NUM = {
   sat: 6,
 };
 
+function shortIso(x) {
+  return String(x || "").slice(0, 10);
+}
+
 function normalizeWeekAvailability(wa) {
-  if (!wa) return null;
+  if (wa === null || wa === undefined) return null; // يعني متاح كل الأيام
   if (Array.isArray(wa)) {
     return wa
       .map((v) => {
@@ -159,18 +163,21 @@ function normalizeWeekAvailability(wa) {
 
 function driverWorksOnDay(driver, isoDate) {
   const list = normalizeWeekAvailability(driver?.weekAvailability);
-  if (!list || list.length === 0) return true;
-  const weekdayJs = new Date(isoDate).getDay();
+  if (list === null) return true; // غير معرّفة → متاح كل الأيام
+  if (Array.isArray(list) && list.length === 0) return false; // مصفوفة فاضية → غير متاح إطلاقًا
+  const weekdayJs = new Date(shortIso(isoDate)).getDay();
   return list.includes(weekdayJs);
 }
 
 function driverOnLeave(driver, isoDate) {
-  const arr = Array.isArray(driver?.leaves)
-    ? driver.leaves
-    : typeof driver?.leaves === "string" && driver.leaves.trim()
-    ? driver.leaves.split(",").map((s) => s.trim())
-    : [];
-  return arr.includes(isoDate);
+  const arr =
+    Array.isArray(driver?.leaves) && driver.leaves.length
+      ? driver.leaves
+      : typeof driver?.leaves === "string" && driver.leaves.trim()
+      ? driver.leaves.split(",").map((s) => s.trim())
+      : [];
+  const normalized = arr.map((d) => shortIso(d));
+  return normalized.includes(shortIso(isoDate));
 }
 
 function driverAllowedForJob(driver, job) {
@@ -205,7 +212,7 @@ function getEffectiveDurationHours(job) {
 function isResourceBusy(jobs, excludeJobId, dateISO, start, dur, predicate) {
   return (jobs || []).some((other) => {
     if (other.id === excludeJobId) return false;
-    if (other.date !== dateISO) return false;
+    if (shortIso(other.date) !== shortIso(dateISO)) return false;
     const otherDur = getEffectiveDurationHours(other);
     return predicate(other) && rangesOverlap(start, dur, other.start, otherDur);
   });
@@ -223,7 +230,7 @@ function exceedsDriverLimitForTractor(state, job, newDriverId) {
   return false;
 }
 
-/* ===== validator ===== */
+/* ===== validator (يرفض السائق لو في إجازة / مش شغّال اليوم) ===== */
 function validateWholeJob(state, candidateJob, originalJobId) {
   if (isFixed4hBlock(candidateJob) && (candidateJob.durationHours || 0) > 4) {
     return {
@@ -240,14 +247,17 @@ function validateWholeJob(state, candidateJob, originalJobId) {
   if (Array.isArray(candidateJob.driverIds)) {
     for (const dId of candidateJob.driverIds) {
       const driver = (state.drivers || []).find((d) => d.id === dId);
+
+      // ✅ المنع الصريح لو إجازة / مش شغّال اليوم / ممنوع ليل
       if (!driverAllowedForJob(driver, candidateJob)) {
         return {
           ok: false,
-          reason: `Driver "${driver?.name || dId}" is not available on ${
-            candidateJob.date
-          }.`,
+          reason: `Driver "${
+            driver?.name || dId
+          }" is not available on ${shortIso(candidateJob.date)}.`,
         };
       }
+
       const busy = isResourceBusy(
         state.jobs,
         originalJobId,
@@ -260,9 +270,11 @@ function validateWholeJob(state, candidateJob, originalJobId) {
       if (busy) {
         return {
           ok: false,
-          reason: `Driver "${driver?.name || dId}" is already busy on ${
+          reason: `Driver "${
+            driver?.name || dId
+          }" is already busy on ${shortIso(
             candidateJob.date
-          } at ${start} for ${dur}h.`,
+          )} at ${start} for ${dur}h.`,
         };
       }
       if (exceedsDriverLimitForTractor(state, candidateJob, dId)) {
@@ -283,12 +295,14 @@ function validateWholeJob(state, candidateJob, originalJobId) {
       candidateJob.date,
       start,
       dur,
-      (o) => o.tractorId === candidateJob.tractorId
+      (o) => String(o.tractorId) === String(candidateJob.tractorId)
     );
     if (busyTr)
       return {
         ok: false,
-        reason: `This tractor is already busy on ${candidateJob.date} at ${start}.`,
+        reason: `This tractor is already busy on ${shortIso(
+          candidateJob.date
+        )} at ${start}.`,
       };
   }
 
@@ -300,12 +314,14 @@ function validateWholeJob(state, candidateJob, originalJobId) {
       candidateJob.date,
       start,
       dur,
-      (o) => o.trailerId === candidateJob.trailerId
+      (o) => String(o.trailerId) === String(candidateJob.trailerId)
     );
     if (busyTrl)
       return {
         ok: false,
-        reason: `This trailer is already busy on ${candidateJob.date} at ${start}.`,
+        reason: `This trailer is already busy on ${shortIso(
+          candidateJob.date
+        )} at ${start}.`,
       };
   }
 
@@ -683,6 +699,7 @@ export default function DayPlanner() {
                   </div>
                 </div>
 
+                {/* ✅ نمرر lockDateISO لعرض أيقونة المنع على السواقين في يوم الإجازة */}
                 <ResourcePool
                   title="Tractors"
                   icon={Truck}

@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+// front/src/pages/AdminDriversPage.jsx
+import React, { useEffect, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { apiGetState, apiSaveState } from "../lib/api";
@@ -8,14 +9,12 @@ export default function AdminDriversPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
 
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
+  if (!user) return <Navigate to="/login" replace />;
 
   const [fullState, setFullState] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  const savingRef = useRef(false);
+  const latestDriversRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -26,9 +25,9 @@ export default function AdminDriversPage() {
           drivers: Array.isArray(apiState?.drivers) ? apiState.drivers : [],
         };
         setFullState(safeState);
+        latestDriversRef.current = safeState.drivers;
       } catch (err) {
-        console.error("Failed to load state for drivers page:", err);
-        setError("Failed to load drivers");
+        console.error("Failed to load drivers:", err);
         setFullState({ drivers: [] });
       } finally {
         setLoading(false);
@@ -36,25 +35,47 @@ export default function AdminDriversPage() {
     })();
   }, []);
 
-  async function handleSaveDrivers(nextDrivers) {
-    if (!fullState) return;
-    setSaving(true);
-    setError("");
-
-    const nextState = {
-      ...fullState,
-      drivers: nextDrivers,
-    };
-
+  async function saveDrivers(driversList, silent = false) {
+    if (!isAdmin || !fullState) return;
+    if (savingRef.current) return;
+    savingRef.current = true;
     try {
+      const nextState = { ...fullState, drivers: driversList };
       await apiSaveState(nextState);
       setFullState(nextState);
     } catch (err) {
-      console.error("Failed to save drivers:", err);
-      setError("Failed to save drivers");
+      if (!silent) alert("Failed to save drivers");
+      console.error(err);
     } finally {
-      setSaving(false);
+      savingRef.current = false;
     }
+  }
+
+  // Auto-save timer
+  useEffect(() => {
+    if (!isAdmin) return;
+    const id = setInterval(() => {
+      if (latestDriversRef.current) saveDrivers(latestDriversRef.current, true);
+    }, 10000);
+    return () => clearInterval(id);
+  }, [isAdmin]);
+
+  // before unload save
+  useEffect(() => {
+    if (!isAdmin) return;
+    const h = () => {
+      if (latestDriversRef.current) {
+        // ملاحظة: بعض المتصفحات تمنع async هنا — ده “محاولة”
+        saveDrivers(latestDriversRef.current, true);
+      }
+    };
+    window.addEventListener("beforeunload", h);
+    return () => window.removeEventListener("beforeunload", h);
+  }, [isAdmin]);
+
+  function handleSaveDrivers(nextDrivers) {
+    latestDriversRef.current = nextDrivers;
+    saveDrivers(nextDrivers);
   }
 
   if (!isAdmin) {
@@ -64,16 +85,10 @@ export default function AdminDriversPage() {
       </div>
     );
   }
-
-  if (loading) {
-    return <div className="p-4 text-sm text-gray-500">Loading…</div>;
-  }
+  if (loading) return <div className="p-4 text-sm text-gray-500">Loading…</div>;
 
   return (
     <div className="p-4 space-y-4">
-      {saving && <div className="text-xs text-blue-600">Saving drivers…</div>}
-      {error && <div className="text-xs text-red-600">{error}</div>}
-
       <AdminDriverSchedule
         drivers={fullState?.drivers || []}
         onSaveDrivers={handleSaveDrivers}

@@ -2,6 +2,7 @@ import React from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { Plus, AlertTriangle } from "lucide-react";
 import { Link } from "react-router-dom";
+import { labelsFor } from "../constants/trailerTaxonomy";
 
 const STATUS_COLORS = {
   incomplete: "bg-gray-400",
@@ -105,6 +106,15 @@ function JobCard({
   tractor,
   trailer,
 }) {
+  const trailerTypes = trailer
+    ? Array.isArray(trailer.types)
+      ? trailer.types
+      : trailer.type
+      ? [trailer.type]
+      : []
+    : [];
+  const trailerTypeLabels = labelsFor(trailerTypes);
+
   const { setNodeRef, isOver } = useDroppable({ id: job.id });
 
   const start = job.start || (job.slot === "night" ? "20:00" : "08:00");
@@ -156,9 +166,15 @@ function JobCard({
         )}
 
         {trailer ? (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px]">
-            🛞 {trailer.code || trailer.plate || trailer.id}
-          </span>
+          trailerTypeLabels.length ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px]">
+              🛞 {trailerTypeLabels.join(", ")}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px]">
+              🛞 Trailer
+            </span>
+          )
         ) : (
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-50 text-orange-700 text-[10px]">
             <AlertTriangle size={10} /> Missing trailer
