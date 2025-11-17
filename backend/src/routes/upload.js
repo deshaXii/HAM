@@ -23,6 +23,7 @@ const storage = multer.diskStorage({
     cb(null, "driver-" + unique + ext);
   },
 });
+
 const upload = multer({ storage });
 
 router.post(

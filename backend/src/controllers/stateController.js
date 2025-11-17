@@ -33,12 +33,17 @@ const DEFAULT_STATE = {
  */
 function normalizeState(raw) {
   const src = raw || {};
+  const normalizeTrailers = (list) =>
+    (Array.isArray(list) ? list : []).map((t) => ({
+      ...t,
+      types: Array.isArray(t.types) ? t.types : t.type ? [t.type] : [],
+    }));
   return {
     ...DEFAULT_STATE,
     ...src,
     drivers: Array.isArray(src.drivers) ? src.drivers : [],
     tractors: Array.isArray(src.tractors) ? src.tractors : [],
-    trailers: Array.isArray(src.trailers) ? src.trailers : [],
+    trailers: normalizeTrailers(src.trailers),
     jobs: Array.isArray(src.jobs) ? src.jobs : [],
     locations: Array.isArray(src.locations)
       ? src.locations
@@ -49,10 +54,7 @@ function normalizeState(raw) {
         : {},
     settings:
       typeof src.settings === "object" && src.settings !== null
-        ? {
-            ...DEFAULT_STATE.settings,
-            ...src.settings,
-          }
+        ? { ...DEFAULT_STATE.settings, ...src.settings }
         : { ...DEFAULT_STATE.settings },
   };
 }
