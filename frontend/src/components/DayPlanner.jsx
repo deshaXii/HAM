@@ -677,55 +677,55 @@ export default function DayPlanner() {
       >
         <div className="max-w-[1800px] mx-auto p-6">
           <div
-            className={`grid ${
-              isAdmin ? "grid-cols-1 xl:grid-cols-4 gap-6" : ""
-            }`}
+            className={` ${isAdmin ? "flex flex-col xl:flex-row gap-4" : ""}`}
           >
             {isAdmin && (
-              <div className="xl:col-span-1 space-y-6">
-                <div className="card p-4 bg-white rounded-lg shadow-sm border border-gray-200">
-                  <div className="relative">
-                    <Search
-                      className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
-                      size={18}
-                    />
-                    <input
-                      type="text"
-                      placeholder="Search resources..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full border border-gray-300 rounded-lg pl-10 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                    />
+              <div className="w-full xl:w-[240px] flex-shrink-0 flex flex-col gap-4">
+                <div className="xl:col-span-1 space-y-6 sticky top-0 left-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden overflow-y-scroll h-[100vh]">
+                  <div className="card p-4 bg-white rounded-lg shadow-sm border border-gray-200">
+                    <div className="relative">
+                      <Search
+                        className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+                        size={18}
+                      />
+                      <input
+                        type="text"
+                        placeholder="Search resources..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg pl-10 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                      />
+                    </div>
                   </div>
-                </div>
 
-                {/* ✅ نمرر lockDateISO لعرض أيقونة المنع على السواقين في يوم الإجازة */}
-                <ResourcePool
-                  title="Tractors"
-                  icon={Truck}
-                  resources={filteredResources(state.tractors, "tractor")}
-                  type="tractor"
-                  jobs={state.jobs}
-                />
-                <ResourcePool
-                  title="Trailers"
-                  icon={Package}
-                  resources={filteredResources(state.trailers, "trailer")}
-                  type="trailer"
-                  jobs={state.jobs}
-                />
-                <ResourcePool
-                  title="Drivers"
-                  icon={Users}
-                  resources={filteredResources(state.drivers, "driver")}
-                  type="driver"
-                  jobs={state.jobs}
-                  lockDateISO={date}
-                />
+                  {/* ✅ نمرر lockDateISO لعرض أيقونة المنع على السواقين في يوم الإجازة */}
+                  <ResourcePool
+                    title="Tractors"
+                    icon={Truck}
+                    resources={filteredResources(state.tractors, "tractor")}
+                    type="tractor"
+                    jobs={state.jobs}
+                  />
+                  <ResourcePool
+                    title="Trailers"
+                    icon={Package}
+                    resources={filteredResources(state.trailers, "trailer")}
+                    type="trailer"
+                    jobs={state.jobs}
+                  />
+                  <ResourcePool
+                    title="Drivers"
+                    icon={Users}
+                    resources={filteredResources(state.drivers, "driver")}
+                    type="driver"
+                    jobs={state.jobs}
+                    lockDateISO={date}
+                  />
+                </div>
               </div>
             )}
 
-            <div className="xl:col-span-3">
+            <div className="flex-1 min-w-0">
               <DayTimelineView
                 date={date}
                 state={state}

@@ -1,79 +1,120 @@
-// src/components/MultiTypeSelect.jsx
-import React, { useState, useMemo } from "react";
-import { ChevronDown } from "lucide-react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
+import { ChevronDown, ChevronUp, Minus, Plus } from "lucide-react";
+import {
+  TRAILER_TAXONOMY,
+  labelsForPath,
+  normalizeToPath,
+} from "../constants/trailerTaxonomy";
 
 export default function MultiTypeSelect({
-  taxonomy,
-  value = [],
+  value = [], // نتوقع [family, variant] أو أي قيمة قديمة هنطبّعها
   onChange,
-  placeholder = "Select types...",
+  placeholder = "Select type…",
 }) {
+  const path = normalizeToPath(value); // [family, variant] أو []
+  const familyVal = path[0] || "";
+  const variantVal = path[1] || "";
+
   const [open, setOpen] = useState(false);
-  const valSet = useMemo(() => new Set(value), [value]);
+  const [expandedFamily, setExpandedFamily] = useState(familyVal || ""); // افتح الأسرة المختارة
 
-  const toggle = (v) => {
-    const next = new Set(valSet);
-    next.has(v) ? next.delete(v) : next.add(v);
-    onChange(Array.from(next));
-  };
+  const containerRef = useRef(null);
+  useEffect(() => {
+    function onDoc(e) {
+      if (!containerRef.current) return;
+      if (!containerRef.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
 
-  const toggleGroup = (group) => {
-    const children = (group.children || []).map((c) => c.value);
-    const allOn = children.every((v) => valSet.has(v));
-    const next = new Set(valSet);
-    children.forEach((v) => (allOn ? next.delete(v) : next.add(v)));
-    onChange(Array.from(next));
-  };
+  // لو القيمة تغيّرت من الأب، ساير التوسيع
+  useEffect(() => {
+    if (familyVal && expandedFamily !== familyVal) setExpandedFamily(familyVal);
+  }, [familyVal]); // eslint-disable-line
 
-  const summary = () => {
-    if (!value.length) return placeholder;
-    return `${value.length} selected`;
-  };
+  const summaryText = useMemo(() => {
+    const labs = labelsForPath(path);
+    return labs.length ? labs.join(" → ") : placeholder;
+  }, [path, placeholder]);
+
+  function toggleFamily(fVal) {
+    setExpandedFamily((prev) => (prev === fVal ? "" : fVal));
+    // 👇 مهم: لا نستدعي onChange هنا؛ الاختيار الحقيقي عند variant فقط
+  }
+
+  function chooseVariant(vVal) {
+    const fam = familyVal || expandedFamily;
+    if (!fam) return;
+    onChange([fam, vVal]);
+    setOpen(false); // إغلاق بعد الاختيار
+  }
 
   return (
-    <div className="relative">
+    <div className="relative" ref={containerRef}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-between border rounded px-2 py-1.5 text-sm bg-white hover:bg-gray-50"
+        className="w-full flex items-center justify-between border rounded px-3 py-2 text-sm bg-white hover:bg-gray-50"
       >
-        <span className="truncate text-gray-700">{summary()}</span>
-        <ChevronDown size={16} className="text-gray-500" />
+        <span className={path.length ? "text-gray-700" : "text-gray-400"}>
+          {summaryText}
+        </span>
+        {open ? (
+          <ChevronUp size={16} className="text-gray-500" />
+        ) : (
+          <ChevronDown size={16} className="text-gray-500" />
+        )}
       </button>
 
       {open && (
         <div className="absolute z-20 mt-1 w-full bg-white border rounded-lg shadow-lg p-2 max-h-72 overflow-auto">
-          {taxonomy.map((group) => {
-            const children = group.children || [];
-            const allOn =
-              children.length > 0 && children.every((v) => valSet.has(v.value));
-            const someOn = !allOn && children.some((v) => valSet.has(v.value));
+          {TRAILER_TAXONOMY.map((group) => {
+            const isOpen = (expandedFamily || familyVal) === group.value;
+
             return (
               <div key={group.value} className="mb-2">
-                <label className="flex items-center gap-2 font-semibold text-sm text-gray-800">
-                  <input
-                    type="checkbox"
-                    checked={allOn}
-                    ref={(el) => el && (el.indeterminate = someOn)}
-                    onChange={() => toggleGroup(group)}
-                  />
+                {/* زر العائلة: يوسّع/يطوي فقط */}
+                <button
+                  type="button"
+                  onClick={() => toggleFamily(group.value)}
+                  className={`w-full flex items-center gap-2 px-2 py-1 rounded text-sm font-semibold ${
+                    isOpen
+                      ? "bg-blue-50 text-blue-700"
+                      : "hover:bg-gray-50 text-gray-800"
+                  }`}
+                >
+                  {isOpen ? <Minus size={14} /> : <Plus size={14} />}
                   {group.label}
-                </label>
-                <div className="pl-6 mt-1 space-y-1">
-                  {children.map((ch) => (
-                    <label
-                      key={ch.value}
-                      className="flex items-center gap-2 text-sm text-gray-700"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={valSet.has(ch.value)}
-                        onChange={() => toggle(ch.value)}
-                      />
-                      {ch.label}
-                    </label>
-                  ))}
-                </div>
+                </button>
+
+                {/* خيارات الـ variant: اختيار واحد */}
+                {isOpen && (
+                  <div className="pl-6 mt-1 space-y-1">
+                    {(group.children || []).map((ch) => {
+                      const selected =
+                        variantVal === ch.value &&
+                        (familyVal || expandedFamily) === group.value;
+                      return (
+                        <label
+                          key={ch.value}
+                          className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer text-sm ${
+                            selected ? "bg-emerald-50" : "hover:bg-gray-50"
+                          }`}
+                          onClick={() => chooseVariant(ch.value)}
+                        >
+                          <input
+                            type="radio"
+                            name="trailer-variant"
+                            checked={!!selected}
+                            readOnly
+                          />
+                          <span className="text-gray-700">{ch.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             );
           })}

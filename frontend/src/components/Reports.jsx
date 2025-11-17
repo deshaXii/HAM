@@ -13,19 +13,14 @@ import {
   BarChart2,
   Users,
   Truck,
+  MapPin,
+  Clock4,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { apiGetState } from "../lib/api";
 import useServerEventRefetch from "../hooks/useServerEventRefetch";
 
 /* ---------- Helpers ---------- */
-function toISO(d) {
-  const x = new Date(d);
-  const y = x.getFullYear();
-  const m = String(x.getMonth() + 1).padStart(2, "0");
-  const dd = String(x.getDate()).padStart(2, "0");
-  return `${y}-${m}-${dd}`;
-}
 function monthKey(isoDate) {
   // "2025-07"
   return String(isoDate || "").slice(0, 7);
@@ -41,6 +36,120 @@ function niceMonthLabel(ym) {
 }
 function safeArr(a) {
   return Array.isArray(a) ? a : [];
+}
+function fmtTimeRange(job) {
+  const s = job.start || (job.slot === "night" ? "20:00" : "08:00");
+  const dur = Number(job.durationHours || 0);
+  if (!dur) return s;
+  const [hh, mm] = s.split(":").map((n) => parseInt(n || "0", 10));
+  const start = new Date(2000, 0, 1, hh, mm || 0, 0, 0);
+  const end = new Date(start.getTime() + dur * 3600 * 1000);
+  const eH = String(end.getHours()).padStart(2, "0");
+  const eM = String(end.getMinutes()).padStart(2, "0");
+  return `${s} → ${eH}:${eM}`;
+}
+
+/* ---------- Small UI ---------- */
+function SummaryCard({ icon, label, value }) {
+  return (
+    <div className="card p-4 flex items-center justify-between bg-white border border-gray-200 rounded-xl shadow-sm">
+      <div>
+        <p className="text-xs font-medium text-gray-600">{label}</p>
+        <p className="text-xl font-bold text-gray-900">{value}</p>
+      </div>
+      <div className="p-2 bg-gray-100 rounded-lg">{icon}</div>
+    </div>
+  );
+}
+
+function Modal({ open, onClose, title, children, widthClass = "max-w-3xl" }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === "Escape") onClose?.();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[70]">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute inset-0 flex items-center justify-center p-4">
+        <div
+          ref={ref}
+          className={`w-full ${widthClass} bg-white rounded-xl shadow-lg border`}
+        >
+          <div className="px-5 py-3 border-b flex items-center justify-between">
+            <h3 className="font-semibold text-gray-900">{title}</h3>
+            <button
+              onClick={onClose}
+              className="text-sm text-gray-600 hover:text-gray-800"
+            >
+              Close
+            </button>
+          </div>
+          <div className="p-4 max-h-[70vh] overflow-auto">{children}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function JobList({ jobs, tractors, drivers, trailers }) {
+  if (!jobs?.length) {
+    return <div className="text-sm text-gray-500">No events.</div>;
+  }
+  return (
+    <div className="space-y-2">
+      {jobs.map((j) => {
+        const tractor = tractors.find(
+          (t) => String(t.id) === String(j.tractorId)
+        );
+        const driverLabels = safeArr(j.driverIds).map((id) => {
+          const d = drivers.find((x) => String(x.id) === String(id));
+          return d?.name || d?.code || String(id);
+        });
+        const trailer = trailers.find(
+          (t) => String(t.id) === String(j.trailerId)
+        );
+        return (
+          <div
+            key={j.id}
+            className="border rounded-lg p-3 bg-white hover:bg-gray-50"
+          >
+            <div className="flex items-center justify-between">
+              <div className="font-semibold text-sm text-gray-900">
+                {j.client || "(No client)"} • {j.date}
+              </div>
+              <div className="text-xs text-gray-500">{fmtTimeRange(j)}</div>
+            </div>
+            <div className="mt-1 text-xs text-gray-600 flex flex-wrap gap-2">
+              <span className="inline-flex items-center gap-1">
+                <Clock4 size={14} />
+                {j.slot?.toUpperCase?.() || "DAY"}
+              </span>
+              {tractor && (
+                <span className="inline-flex items-center gap-1">
+                  🚚 {tractor.code || tractor.plate || tractor.id}
+                </span>
+              )}
+              {trailer && <span>🛞 {trailer.code || trailer.id}</span>}
+              {driverLabels.length > 0 && (
+                <span>👤 {driverLabels.join(", ")}</span>
+              )}
+              {(j.startPoint || j.endPoint) && (
+                <span className="inline-flex items-center gap-1">
+                  <MapPin size={14} />
+                  {(j.startPoint || "—") + " → " + (j.endPoint || "—")}
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 /* ---------- Main ---------- */
@@ -59,6 +168,20 @@ export default function Reports() {
   const [toDate, setToDate] = useState("");
 
   const printRef = useRef(null);
+
+  // Hover popover for day chips
+  const [hoverCard, setHoverCard] = useState({
+    show: false,
+    x: 0,
+    y: 0,
+    title: "",
+    jobs: [],
+  });
+
+  // Event modal
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalTitle, setModalTitle] = useState("");
+  const [modalJobs, setModalJobs] = useState([]);
 
   const refetch = useCallback(async () => {
     try {
@@ -107,7 +230,7 @@ export default function Reports() {
     // group by client -> month -> { count, dates[] }
     const map = new Map();
     for (const j of filteredJobs) {
-      const c = j.client || "(No client)";
+      const c = j.client || "(No client)"; // group key
       const mk = monthKey(j.date);
       if (!map.has(c)) map.set(c, new Map());
       const byMonth = map.get(c);
@@ -130,14 +253,11 @@ export default function Reports() {
     }
     // if the user typed a specific client, focus that first
     out.sort((a, b) => {
-      const aHit = a.client
-        .toLowerCase()
-        .includes(clientQuery.trim().toLowerCase());
-      const bHit = b.client
-        .toLowerCase()
-        .includes(clientQuery.trim().toLowerCase());
+      const q = clientQuery.trim().toLowerCase();
+      const aHit = a.client.toLowerCase().includes(q);
+      const bHit = b.client.toLowerCase().includes(q);
       if (aHit !== bHit) return aHit ? -1 : 1;
-      return a.client.localeCompare(b.client);
+      return (a.client || "").localeCompare(b.client || "");
     });
     return out;
   }, [filteredJobs, clientQuery]);
@@ -256,13 +376,40 @@ export default function Reports() {
   }
 
   function exportPDF() {
-    // بدون مكتبات خارجية: نفتح وضع الطباعة بطبقة مهيئة للطباعة (Save as PDF)
     window.print();
+  }
+
+  /* ---------- Hover helpers ---------- */
+  function openHoverForDate(e, client, dateISO) {
+    const jobs = filteredJobs
+      .filter((j) => (j.client || "(No client)") === client)
+      .filter((j) => j.date === dateISO)
+      .sort((a, b) => (a.start || "").localeCompare(b.start || ""));
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    setHoverCard({
+      show: true,
+      x: rect.left + rect.width / 2,
+      y: rect.top + window.scrollY - 8,
+      title: `${client} — ${dateISO}`,
+      jobs,
+    });
+  }
+  function closeHover() {
+    setHoverCard((s) => ({ ...s, show: false }));
+  }
+  function openModal(title, jobs) {
+    setModalTitle(title);
+    setModalJobs(jobs);
+    setModalOpen(true);
   }
 
   /* ============== Render ============== */
   return (
-    <div className="min-h-screen bg-gray-50 p-6 print:p-0" ref={printRef}>
+    <div
+      className="min-h-screen bg-gray-50 p-6 print:p-0 relative"
+      ref={printRef}
+    >
       <div className="max-w-[1600px] mx-auto space-y-6">
         {/* Header */}
         <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4 print:hidden">
@@ -385,14 +532,13 @@ export default function Reports() {
         </div>
 
         {/* Client Report Table */}
-        <section className="bg-white border border-gray-200 rounded-xl shadow-sm p-4 break-inside-avoid">
+        <section className="bg-white border border-gray-200 rounded-xl shadow-sm p-4 break-inside-avoid relative">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold text-gray-800">
               Client Report
             </h2>
             <div className="text-[11px] text-gray-500">
-              Shows per-month visit counts and exact dates for the filtered
-              client(s).
+              Hover any date to preview events, click “View all” to open them.
             </div>
           </div>
 
@@ -440,7 +586,24 @@ export default function Reports() {
                               {m.dates.map((d) => (
                                 <span
                                   key={`${g.client}-${m.month}-${d}`}
-                                  className="px-2 py-0.5 rounded-full bg-gray-100 border text-[10px]"
+                                  className="px-2 py-0.5 rounded-full bg-gray-100 border text-[10px] cursor-pointer hover:bg-gray-200"
+                                  onClick={() =>
+                                    openModal(
+                                      `${g.client} — ${d}`,
+                                      filteredJobs
+                                        .filter(
+                                          (j) =>
+                                            (j.client || "(No client)") ===
+                                              g.client && j.date === d
+                                        )
+                                        .sort((a, b) =>
+                                          (a.start || "").localeCompare(
+                                            b.start || ""
+                                          )
+                                        )
+                                    )
+                                  }
+                                  title="View events"
                                 >
                                   {d}
                                 </span>
@@ -462,7 +625,7 @@ export default function Reports() {
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold text-gray-800">Utilization</h2>
             <div className="text-[11px] text-gray-500">
-              Most active tractors and drivers within the current filters.
+              Click a number to open its events.
             </div>
           </div>
 
@@ -495,17 +658,32 @@ export default function Reports() {
                         </td>
                       </tr>
                     ) : (
-                      util.tractors.map((t) => (
-                        <tr
-                          key={`t-${t.id}`}
-                          className="border-b last:border-b-0"
-                        >
-                          <td className="px-3 py-2">{t.code}</td>
-                          <td className="px-3 py-2 text-right font-semibold">
-                            {t.count}
-                          </td>
-                        </tr>
-                      ))
+                      util.tractors.map((t) => {
+                        const jobs = filteredJobs
+                          .filter((j) => String(j.tractorId) === String(t.id))
+                          .sort((a, b) =>
+                            (a.date || "").localeCompare(b.date || "")
+                          );
+                        return (
+                          <tr
+                            key={`t-${t.id}`}
+                            className="border-b last:border-b-0"
+                          >
+                            <td className="px-3 py-2">{t.code}</td>
+                            <td className="px-3 py-2 text-right font-semibold">
+                              <button
+                                className="underline decoration-dotted hover:text-blue-700"
+                                onClick={() =>
+                                  openModal(`Tractor ${t.code} — events`, jobs)
+                                }
+                                title="View events"
+                              >
+                                {t.count}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
@@ -540,17 +718,36 @@ export default function Reports() {
                         </td>
                       </tr>
                     ) : (
-                      util.drivers.map((d) => (
-                        <tr
-                          key={`d-${d.id}`}
-                          className="border-b last:border-b-0"
-                        >
-                          <td className="px-3 py-2">{d.name}</td>
-                          <td className="px-3 py-2 text-right font-semibold">
-                            {d.count}
-                          </td>
-                        </tr>
-                      ))
+                      util.drivers.map((d) => {
+                        const jobs = filteredJobs
+                          .filter((j) =>
+                            safeArr(j.driverIds).some(
+                              (id) => String(id) === String(d.id)
+                            )
+                          )
+                          .sort((a, b) =>
+                            (a.date || "").localeCompare(b.date || "")
+                          );
+                        return (
+                          <tr
+                            key={`d-${d.id}`}
+                            className="border-b last:border-b-0"
+                          >
+                            <td className="px-3 py-2">{d.name}</td>
+                            <td className="px-3 py-2 text-right font-semibold">
+                              <button
+                                className="underline decoration-dotted hover:text-blue-700"
+                                onClick={() =>
+                                  openModal(`Driver ${d.name} — events`, jobs)
+                                }
+                                title="View events"
+                              >
+                                {d.count}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
@@ -565,6 +762,56 @@ export default function Reports() {
         </div>
       </div>
 
+      {/* Hover card */}
+      {hoverCard.show && (
+        <div
+          className="absolute z-[60]"
+          style={{
+            left: hoverCard.x,
+            top: hoverCard.y,
+            transform: "translate(-50%, -100%)",
+          }}
+          onMouseEnter={() => setHoverCard((s) => ({ ...s, show: true }))}
+          onMouseLeave={closeHover}
+        >
+          <div className="bg-white border shadow-lg rounded-lg p-3 w-[340px]">
+            <div className="text-xs font-semibold text-gray-800 mb-2">
+              {hoverCard.title}
+            </div>
+            <JobList
+              jobs={hoverCard.jobs}
+              tractors={state.tractors}
+              drivers={state.drivers}
+              trailers={state.trailers}
+            />
+            {hoverCard.jobs?.length > 0 && (
+              <div className="mt-2 text-right">
+                <button
+                  className="text-xs text-blue-700 hover:underline"
+                  onClick={() => openModal(hoverCard.title, hoverCard.jobs)}
+                >
+                  View all
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal with events */}
+      <Modal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={modalTitle}
+      >
+        <JobList
+          jobs={modalJobs}
+          tractors={state.tractors}
+          drivers={state.drivers}
+          trailers={state.trailers}
+        />
+      </Modal>
+
       {/* Print styles */}
       <style>{`
         @media print {
@@ -575,19 +822,6 @@ export default function Reports() {
           body { background: #fff !important; }
         }
       `}</style>
-    </div>
-  );
-}
-
-/* ---------- Small UI ---------- */
-function SummaryCard({ icon, label, value }) {
-  return (
-    <div className="card p-4 flex items-center justify-between bg-white border border-gray-200 rounded-xl shadow-sm">
-      <div>
-        <p className="text-xs font-medium text-gray-600">{label}</p>
-        <p className="text-xl font-bold text-gray-900">{value}</p>
-      </div>
-      <div className="p-2 bg-gray-100 rounded-lg">{icon}</div>
     </div>
   );
 }

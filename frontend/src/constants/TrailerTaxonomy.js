@@ -43,12 +43,56 @@ export const TRAILER_TAXONOMY = [
   },
 ];
 
-// Helper لتحويل values -> labels للعرض
+/* ========= Helpers ========= */
+
+// ابحث بسرعة
+const familyByValue = new Map(TRAILER_TAXONOMY.map((g) => [g.value, g]));
+const childToFamily = new Map();
+TRAILER_TAXONOMY.forEach((f) => {
+  (f.children || []).forEach((c) => childToFamily.set(c.value, f.value));
+});
+
+/** هل المسار صالح؟ [family, variant] */
+export function isValidPath(path = []) {
+  if (!Array.isArray(path) || path.length < 2) return false;
+  const fam = familyByValue.get(path[0]);
+  if (!fam) return false;
+  return (fam.children || []).some((c) => c.value === path[1]);
+}
+
+/** labelsForPath(['box','box_grote_klep']) => ['Box','box grote klep'] */
+export function labelsForPath(path = []) {
+  if (!Array.isArray(path) || path.length === 0) return [];
+  const [famVal, childVal] = path;
+  const fam = familyByValue.get(famVal);
+  if (!fam) return [];
+  if (!childVal) return [fam.label];
+  const child = (fam.children || []).find((c) => c.value === childVal);
+  return child ? [fam.label, child.label] : [fam.label];
+}
+
+/**
+ * تحويل أي قيمة قديمة للمسار القياسي:
+ *  - لو كانت ['box','box_grote_klep'] يمرّ كما هو
+ *  - لو كانت 'box_grote_klep' (قديمة) هنرجع ['box','box_grote_klep']
+ *  - لو كانت Array قديمة بعدّة عناصر هنختار أول child صالح
+ *  - وإلا هنرجع [].
+ */
+export function normalizeToPath(any) {
+  if (isValidPath(any)) return any;
+  if (typeof any === "string") {
+    const fam = childToFamily.get(any);
+    return fam ? [fam, any] : [];
+  }
+  if (Array.isArray(any) && any.length) {
+    // اختَر أول عنصر child ونحاول نلاقي أسرته
+    const firstChild = any.find((v) => childToFamily.has(v));
+    if (firstChild) return [childToFamily.get(firstChild), firstChild];
+  }
+  return [];
+}
+
+/* متوافقة للخلفية مع دالتك السابقة (لو كود قديم بيناديها) */
 export function labelsFor(values = []) {
-  const map = new Map();
-  TRAILER_TAXONOMY.forEach((g) => {
-    map.set(g.value, g.label);
-    (g.children || []).forEach((c) => map.set(c.value, c.label));
-  });
-  return values.map((v) => map.get(v) || v);
+  return labelsForPath(normalizeToPath(values));
 }
