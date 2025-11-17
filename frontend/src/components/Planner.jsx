@@ -41,6 +41,7 @@ function getStartOfWeekMonday(date) {
   d.setDate(d.getDate() + diff);
   return d;
 }
+
 function getWeekDaysFromISO(weekStartISO) {
   const base = new Date(weekStartISO);
   base.setHours(0, 0, 0, 0);
