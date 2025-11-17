@@ -396,7 +396,6 @@ export default function JobModal({
             </div>
           </div>
         </div>
-
         {/* footer */}
         <div className="flex items-center justify-between px-5 py-3 border-t bg-gray-50/60">
           <button
