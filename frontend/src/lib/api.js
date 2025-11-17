@@ -273,7 +273,7 @@ export async function apiUploadDriverPhoto(driverId, file) {
   const t = getToken();
   if (t) headers.Authorization = `Bearer ${t}`;
 
-  const r = await fetch(`${BASE}/upload/driver-photo/${driverId}`, {
+  const r = await fetch(`${BASE}/api/upload/driver-photo/${driverId}`, {
     method: "POST",
     headers,
     body: fd,
