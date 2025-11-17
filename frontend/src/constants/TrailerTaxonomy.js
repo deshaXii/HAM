@@ -71,13 +71,6 @@ export function labelsForPath(path = []) {
   return child ? [fam.label, child.label] : [fam.label];
 }
 
-/**
- * تحويل أي قيمة قديمة للمسار القياسي:
- *  - لو كانت ['box','box_grote_klep'] يمرّ كما هو
- *  - لو كانت 'box_grote_klep' (قديمة) هنرجع ['box','box_grote_klep']
- *  - لو كانت Array قديمة بعدّة عناصر هنختار أول child صالح
- *  - وإلا هنرجع [].
- */
 export function normalizeToPath(any) {
   if (isValidPath(any)) return any;
   if (typeof any === "string") {
