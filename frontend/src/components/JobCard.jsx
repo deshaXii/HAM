@@ -9,6 +9,7 @@ import {
   AlertTriangle,
   Truck,
   Users,
+  Copy,
 } from "lucide-react";
 
 const STATUS_COLORS = {
@@ -20,7 +21,6 @@ const STATUS_COLORS = {
 };
 
 function computeJobStatus(job) {
-  // missing essentials?
   if (
     !job ||
     !job.date ||
@@ -47,7 +47,55 @@ function computeJobStatus(job) {
   return "waiting";
 }
 
-const JobCard = ({ job, resources, onUpdate, onDelete, onOpen, isAdmin }) => {
+/**
+ * نطلع كل التحذيرات (conflicts) لجوب معيّن بناءً على الـ resources.
+ */
+export function getJobWarnings(job, resources) {
+  const drivers = resources?.drivers || [];
+  const tractors = resources?.tractors || [];
+  const trailers = resources?.trailers || [];
+
+  const getDriver = (id) => drivers.find((d) => d.id === id);
+  const getTractor = (id) => tractors.find((t) => t.id === id);
+  const getTrailer = (id) => trailers.find((t) => t.id === id);
+
+  const out = [];
+
+  if (job.slot === "night") {
+    (job.driverIds || []).forEach((driverId) => {
+      const driver = getDriver(driverId);
+      if (driver && !driver.canNight)
+        out.push(`${driver.name} cannot work night shifts`);
+    });
+  }
+
+  if ((job.driverIds || []).length > 1) {
+    const tractor = getTractor(job.tractorId);
+    if (tractor && !tractor.doubleManned)
+      out.push("Tractor not suitable for 2 drivers");
+  }
+
+  if (!job.tractorId) out.push("Missing tractor");
+  if (!job.trailerId) out.push("Missing trailer");
+  if (!job.driverIds || job.driverIds.length === 0) out.push("Missing driver");
+  if (!job.durationHours || job.durationHours === 0)
+    out.push("Missing duration");
+
+  // لو مفيش start/time
+  if (!job.start) out.push("Missing start time");
+
+  return out;
+}
+
+const JobCard = ({
+  job,
+  resources,
+  onUpdate,
+  onDelete,
+  onOpen,
+  onDuplicate,
+  isAdmin,
+}) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState(job);
   const { isOver, setNodeRef } = useDroppable({ id: job.id });
@@ -58,29 +106,8 @@ const JobCard = ({ job, resources, onUpdate, onDelete, onOpen, isAdmin }) => {
   const getTrailer = (id) =>
     (resources.trailers || []).find((t) => t.id === id);
 
-  // تحذيرات
-  const warnings = (() => {
-    const out = [];
-    if (job.slot === "night") {
-      (job.driverIds || []).forEach((driverId) => {
-        const driver = getDriver(driverId);
-        if (driver && !driver.canNight)
-          out.push(`${driver.name} cannot work night shifts`);
-      });
-    }
-    if ((job.driverIds || []).length > 1) {
-      const tractor = getTractor(job.tractorId);
-      if (tractor && !tractor.doubleManned)
-        out.push("Tractor not suitable for 2 drivers");
-    }
-    if (!job.tractorId) out.push("Missing tractor");
-    if (!job.trailerId) out.push("Missing trailer");
-    if (!job.driverIds || job.driverIds.length === 0)
-      out.push("Missing driver");
-    if (!job.durationHours || job.durationHours === 0)
-      out.push("Missing duration");
-    return out;
-  })();
+  const warnings = getJobWarnings(job, resources);
+  const hasWarnings = warnings.length > 0;
 
   const saveInline = () => {
     onUpdate && onUpdate(job.id, editData);
@@ -91,11 +118,11 @@ const JobCard = ({ job, resources, onUpdate, onDelete, onOpen, isAdmin }) => {
     setIsEditing(false);
   };
 
-  // UI helpers
-  const cardBorder =
-    job.overrideStart && job.startPoint ? "border-red-300" : "border-gray-200";
+  let cardBorder = "border-gray-200";
+  if (job.overrideStart && job.startPoint) cardBorder = "border-red-300";
+  if (hasWarnings) cardBorder = "border-amber-400";
 
-  // === EDIT MODE (مختصر) ===
+  /* =========== EDIT MODE =========== */
   if (isEditing) {
     return (
       <div
@@ -105,30 +132,30 @@ const JobCard = ({ job, resources, onUpdate, onDelete, onOpen, isAdmin }) => {
         }`}
       >
         <div className="flex items-center justify-between mb-2">
-          <h4 className="font-semibold text-blue-700">Edit Job</h4>
+          <h4 className="font-semibold text-blue-700 text-sm">Edit Job</h4>
           <div className="flex gap-2">
             <button
               onClick={saveInline}
-              className="text-green-600 hover:text-green-800 p-1"
+              className="text-green-600 hover:text-green-800 p-1 text-sm"
             >
               ✓
             </button>
             <button
               onClick={cancelInline}
-              className="text-red-600 hover:text-red-800 p-1"
+              className="text-red-600 hover:text-red-800 p-1 text-sm"
             >
               ✗
             </button>
           </div>
         </div>
 
-        <div className="space-y-2">
+        <div className="space-y-2 text-xs">
           <input
             value={editData.client}
             onChange={(e) =>
               setEditData((p) => ({ ...p, client: e.target.value }))
             }
-            className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
             placeholder="Client"
           />
           <div className="grid grid-cols-2 gap-1">
@@ -138,7 +165,7 @@ const JobCard = ({ job, resources, onUpdate, onDelete, onOpen, isAdmin }) => {
               onChange={(e) =>
                 setEditData((p) => ({ ...p, startPoint: e.target.value }))
               }
-              className="border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
               placeholder="Start point"
             />
             <input
@@ -147,7 +174,7 @@ const JobCard = ({ job, resources, onUpdate, onDelete, onOpen, isAdmin }) => {
               onChange={(e) =>
                 setEditData((p) => ({ ...p, endPoint: e.target.value }))
               }
-              className="border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
               placeholder="End point"
             />
           </div>
@@ -166,11 +193,11 @@ const JobCard = ({ job, resources, onUpdate, onDelete, onOpen, isAdmin }) => {
           <div className="grid grid-cols-2 gap-1">
             <input
               type="time"
-              value={editData.start}
+              value={editData.start || ""}
               onChange={(e) =>
                 setEditData((p) => ({ ...p, start: e.target.value }))
               }
-              className="border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
             <input
               type="number"
@@ -181,7 +208,7 @@ const JobCard = ({ job, resources, onUpdate, onDelete, onOpen, isAdmin }) => {
                   durationHours: parseFloat(e.target.value) || 0,
                 }))
               }
-              className="border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
               placeholder="Hours"
               step="0.5"
               min="0"
@@ -192,124 +219,149 @@ const JobCard = ({ job, resources, onUpdate, onDelete, onOpen, isAdmin }) => {
     );
   }
 
-  // === VIEW MODE ===
+  /* =========== VIEW MODE =========== */
+  const statusKey = computeJobStatus(job);
+  const statusColor = STATUS_COLORS[statusKey] || STATUS_COLORS.incomplete;
+
+  const pickupLabel = job.startPoint || job.pickup || "Start?";
+  const dropoffLabel = job.endPoint || job.dropoff || "End?";
+
   return (
     <div
       onClick={() => onOpen && onOpen()}
       ref={setNodeRef}
-      className={`bg-white border ${cardBorder} rounded-lg p-3 shadow-sm hover:shadow-md transition-all cursor-pointer ${
-        isOver ? "bg-blue-50 border-2 border-blue-300 border-dashed" : ""
-      }`}
+      className={`relative border ${cardBorder} rounded-xl p-3 pb-6 shadow-sm hover:shadow-md transition-all cursor-pointer text-xs sm:text-[13px] min-h-[92px] ${
+        hasWarnings ? "bg-amber-50" : "bg-white"
+      } ${isOver ? "bg-blue-50 border-2 border-blue-300 border-dashed" : ""}`}
     >
-      {/* Header */}
-      <div className="flex items-start justify-between mb-2">
-        <div className="flex-1 min-w-0">
+      {/* status dot */}
+      <span
+        className={`absolute top-2 left-2 w-2 h-2 rounded-full ${statusColor}`}
+      />
+
+      {/* Header: Client + actions */}
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <div className="flex-1 min-w-0 pl-3">
           <h4 className="font-semibold text-gray-900 truncate text-sm">
-            {job.client}
+            {job.client || "New Client"}
           </h4>
-          <div className="flex items-center gap-1 text-xs text-gray-600 mt-1">
+          <div className="mt-[2px] flex items-center gap-1 text-[11px] text-gray-600">
             <Clock size={12} />
-            <span>{job.start}</span>
-            <span>•</span>
-            <span>{job.durationHours}h</span>
+            <span>{job.start || "--:--"}</span>
+            {job.durationHours ? (
+              <>
+                <span>•</span>
+                <span>{job.durationHours}h</span>
+              </>
+            ) : null}
           </div>
         </div>
 
-        <div className="flex gap-1 ml-2">
-          {isAdmin && (
-            <>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsEditing(true);
-                }}
-                className="p-1 text-gray-400 hover:text-blue-600 rounded hover:bg-blue-50"
-                title="Edit job"
-              >
-                <Edit2 size={14} />
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (window.confirm("Delete this job?"))
-                    onDelete && onDelete(job.id);
-                }}
-                className="p-1 text-gray-400 hover:text-red-600 rounded hover:bg-red-50"
-                title="Delete job"
-              >
-                <Trash2 size={14} />
-              </button>
-            </>
-          )}
-        </div>
+        {isAdmin && (
+          <div className="flex gap-1">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDuplicate && onDuplicate(job.id);
+              }}
+              className="p-1 text-gray-400 hover:text-indigo-600 rounded hover:bg-indigo-50"
+              title="Duplicate job"
+            >
+              <Copy size={14} />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsEditing(true);
+              }}
+              className="p-1 text-gray-400 hover:text-blue-600 rounded hover:bg-blue-50"
+              title="Edit job"
+            >
+              <Edit2 size={14} />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (window.confirm("Delete this job?")) {
+                  onDelete && onDelete(job.id);
+                }
+              }}
+              className="p-1 text-gray-400 hover:text-red-600 rounded hover:bg-red-50"
+              title="Delete job"
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Route */}
-      <div className="flex items-center gap-1 text-xs text-gray-700 mb-3">
+      {/* Route line */}
+      <div className="flex items-center gap-1 text-[11px] text-gray-700 mb-2 pl-3">
         <MapPin size={12} />
-        <span className="truncate">{job.startPoint || "Start?"}</span>
-        <span>→</span>
-        <span className="truncate">{job.endPoint || "End?"}</span>
+        <span className="truncate">
+          {pickupLabel} → {dropoffLabel}
+        </span>
       </div>
 
-      {/* Assigned Resources */}
-      <div className="space-y-2 mb-3">
-        <div className="flex items-center gap-2">
-          <Truck size={14} className="text-blue-600 flex-shrink-0" />
-          <span
-            className={`text-xs px-2 py-1 rounded-full ${
-              job.tractorId
-                ? "bg-blue-100 text-blue-800"
-                : "bg-gray-100 text-gray-500"
-            }`}
-          >
+      {/* Badges: Tractor + Trailer + Drivers جنب بعض */}
+      <div className="flex flex-wrap items-center gap-1 pl-3 pr-8 mb-1">
+        {/* Tractor */}
+        <span
+          className={`inline-flex items-center gap-[4px] px-2 py-[3px] rounded-full text-[11px] ${
+            job.tractorId
+              ? "bg-blue-100 text-blue-800"
+              : "bg-gray-100 text-gray-500"
+          }`}
+        >
+          <Truck size={12} className="shrink-0" />
+          <span>
             {job.tractorId
-              ? getTractor(job.tractorId)?.code
-              : "Missing tractor"}
+              ? getTractor(job.tractorId)?.code || "Tractor"
+              : "No tractor"}
           </span>
-        </div>
+        </span>
 
-        <div className="flex items-center gap-2">
-          <MapPin size={14} className="text-green-600 flex-shrink-0" />
-          <span
-            className={`text-xs px-2 py-1 rounded-full ${
-              job.trailerId
-                ? "bg-green-100 text-green-800"
-                : "bg-gray-100 text-gray-500"
-            }`}
-          >
+        {/* Trailer */}
+        <span
+          className={`inline-flex items-center gap-[4px] px-2 py-[3px] rounded-full text-[11px] ${
+            job.trailerId
+              ? "bg-emerald-100 text-emerald-800"
+              : "bg-gray-100 text-gray-500"
+          }`}
+        >
+          <MapPin size={12} className="shrink-0" />
+          <span>
             {job.trailerId
-              ? getTrailer(job.trailerId)?.code
-              : "Missing trailer"}
+              ? getTrailer(job.trailerId)?.code || "Trailer"
+              : "No trailer"}
           </span>
-        </div>
+        </span>
 
-        <div className="flex items-center gap-2">
-          <Users size={14} className="text-purple-600 flex-shrink-0" />
-          <div className="flex flex-wrap gap-1">
-            {job.driverIds && job.driverIds.length > 0 ? (
-              job.driverIds.map((driverId) => {
-                const driver = getDriver(driverId);
-                return driver ? (
-                  <span
-                    key={driverId}
-                    className="bg-purple-100 text-purple-800 px-2 py-1 rounded-full text-xs"
-                  >
-                    {driver.name}
-                  </span>
-                ) : null;
-              })
-            ) : (
-              <span className="bg-gray-100 text-gray-500 px-2 py-1 rounded-full text-xs">
-                Missing driver
+        {/* Drivers */}
+        {job.driverIds && job.driverIds.length > 0 ? (
+          job.driverIds.map((driverId) => {
+            const driver = getDriver(driverId);
+            if (!driver) return null;
+            return (
+              <span
+                key={driverId}
+                className="inline-flex items-center gap-[4px] px-2 py-[3px] rounded-full bg-purple-100 text-purple-800 text-[11px]"
+              >
+                <Users size={12} className="shrink-0" />
+                <span>{driver.name}</span>
               </span>
-            )}
-          </div>
-        </div>
+            );
+          })
+        ) : (
+          <span className="inline-flex items-center gap-[4px] px-2 py-[3px] rounded-full bg-gray-100 text-gray-500 text-[11px]">
+            <Users size={12} className="shrink-0" />
+            <span>No driver</span>
+          </span>
+        )}
       </div>
 
-      {/* Pricing (هنسيبه مؤقتًا لحد ما تقول تمشي الحسابات ازاي) */}
-      <div className="flex items-center gap-1 text-xs text-gray-700 mb-2 border-t pt-2">
+      {/* Pricing absolute في الركن تحت يمين */}
+      <div className="absolute bottom-2 right-3 flex items-center gap-1 text-[11px] text-gray-700">
         <Euro size={12} />
         <span>
           {job.pricing?.type === "fixed"
@@ -318,16 +370,16 @@ const JobCard = ({ job, resources, onUpdate, onDelete, onOpen, isAdmin }) => {
         </span>
       </div>
 
-      {/* Warnings */}
+      {/* Warnings لو موجودة (تحت على الشمال) */}
       {warnings.length > 0 && (
-        <div className="border-t pt-2 mt-2">
+        <div className="mt-2 pt-2 border-t border-amber-100 pr-16">
           {warnings.map((w, i) => (
             <div
               key={i}
-              className="flex items-center gap-1 text-xs text-amber-700 mb-1"
+              className="flex items-center gap-1 text-[11px] text-amber-700 mb-[2px]"
             >
-              <AlertTriangle size={12} />
-              <span>{w}</span>
+              <AlertTriangle size={11} />
+              <span className="truncate">{w}</span>
             </div>
           ))}
         </div>

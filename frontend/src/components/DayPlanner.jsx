@@ -26,6 +26,13 @@ function timeToMinutes(t) {
     .map((x) => parseInt(x || "0", 10));
   return h * 60 + (m || 0);
 }
+function minutesToTime(mins) {
+  const total = ((mins % (24 * 60)) + 24 * 60) % (24 * 60);
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  const pad = (n) => (n < 10 ? `0${n}` : String(n));
+  return `${pad(h)}:${pad(m)}`;
+}
 function rangesOverlap(startA, durA, startB, durB) {
   const a1 = timeToMinutes(startA);
   const a2 = a1 + (durA || 0) * 60;
@@ -201,12 +208,14 @@ function isFixed4hBlock(job) {
   return FIXED_BLOCK_STARTS.includes(job.start);
 }
 
+/**
+ * المدة الفعّالة بالساعات اللي بنستخدمها في فحص الـ overlap.
+ * دلوقتي ما فيش limit 4 ساعات؛ بنستخدم durationHours زي ما هي.
+ */
 function getEffectiveDurationHours(job) {
-  if (!isFixed4hBlock(job)) {
-    return job.durationHours || 0;
-  }
-  const real = job.durationHours || 0;
-  return real > 4 ? 4 : real;
+  const real = Number(job.durationHours || 0);
+  if (!real || real < 0) return 0;
+  return real;
 }
 
 function isResourceBusy(jobs, excludeJobId, dateISO, start, dur, predicate) {
@@ -232,14 +241,6 @@ function exceedsDriverLimitForTractor(state, job, newDriverId) {
 
 /* ===== validator (يرفض السائق لو في إجازة / مش شغّال اليوم) ===== */
 function validateWholeJob(state, candidateJob, originalJobId) {
-  if (isFixed4hBlock(candidateJob) && (candidateJob.durationHours || 0) > 4) {
-    return {
-      ok: false,
-      reason:
-        "In Day Planner each time block is 4 hours (e.g. 08:00–12:00). You entered a job longer than 4h. Either set duration to 4h or create another job in the next block.",
-    };
-  }
-
   const start = candidateJob.start || "08:00";
   const dur = getEffectiveDurationHours(candidateJob);
 
@@ -248,7 +249,6 @@ function validateWholeJob(state, candidateJob, originalJobId) {
     for (const dId of candidateJob.driverIds) {
       const driver = (state.drivers || []).find((d) => d.id === dId);
 
-      // ✅ المنع الصريح لو إجازة / مش شغّال اليوم / ممنوع ليل
       if (!driverAllowedForJob(driver, candidateJob)) {
         return {
           ok: false,
@@ -380,6 +380,10 @@ export default function DayPlanner() {
   const [activeId, setActiveId] = useState(null);
   const [activeJobId, setActiveJobId] = useState(null);
 
+  // ✅ إعدادات مودال النسخ
+  const [duplicateJobConfig, setDuplicateJobConfig] = useState(null);
+  // duplicateJobConfig: { jobId, date, start, durationHours }
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -450,6 +454,61 @@ export default function DayPlanner() {
     });
   };
 
+  // ✅ فتح مودال النسخ مع default values
+  const startDuplicateJob = (jobId) => {
+    if (!state || !isAdmin) return;
+    const original = (state.jobs || []).find((j) => j.id === jobId);
+    if (!original) return;
+
+    setDuplicateJobConfig({
+      jobId,
+      date: original.date,
+      start: original.start || "08:00",
+      durationHours: original.durationHours || 4,
+    });
+  };
+
+  // ✅ تأكيد النسخ بعد إدخال البيانات في المودال
+  const confirmDuplicateJob = () => {
+    if (!state || !isAdmin || !duplicateJobConfig) return;
+    const original = (state.jobs || []).find(
+      (j) => j.id === duplicateJobConfig.jobId
+    );
+    if (!original) {
+      setDuplicateJobConfig(null);
+      return;
+    }
+
+    const newDate = duplicateJobConfig.date || original.date;
+    const newStart = duplicateJobConfig.start || original.start || "08:00";
+    const newDuration = Number(duplicateJobConfig.durationHours || 0) || 0;
+
+    const copy = {
+      ...original,
+      id: `job-${crypto.randomUUID()}`,
+      date: newDate,
+      start: newStart,
+      durationHours: newDuration,
+    };
+
+    // نضبط الـ slot حسب الوقت الجديد (day / night)
+    const hour = parseInt((newStart || "0").split(":")[0], 10);
+    copy.slot = hour >= 20 || hour < 8 ? "night" : "day";
+
+    // مهم: هنا مش بنستبعد الجوب الأصلي من الفاليديشن
+    // عشان لو اخترت نفس الوقت ونفس الجرار/السواق، يعتبر تعارض.
+    const check = validateWholeJob(state, copy, null);
+    if (!check.ok) {
+      alert(check.reason);
+      return;
+    }
+
+    persistIfAdmin({ ...state, jobs: [...state.jobs, copy] });
+    setDuplicateJobConfig(null);
+  };
+
+  const cancelDuplicateJob = () => setDuplicateJobConfig(null);
+
   const addNewJobAtSlot = (theDate, slotKey) => {
     if (!state || !isAdmin) return;
     const newJob = {
@@ -494,7 +553,6 @@ export default function DayPlanner() {
     const overIdStr = String(over.id);
     const isResource = activeIdStr.startsWith("resource-");
 
-    // helper to parse resource id safely (no split on "-")
     const getResourceInfo = (idStr) => {
       if (idStr.startsWith("resource-driver-")) {
         return {
@@ -622,6 +680,13 @@ export default function DayPlanner() {
     year: "numeric",
   });
 
+  let duplicateEndTime = "";
+  if (duplicateJobConfig && duplicateJobConfig.start) {
+    const startM = timeToMinutes(duplicateJobConfig.start);
+    const durM = Number(duplicateJobConfig.durationHours || 0) * 60;
+    duplicateEndTime = minutesToTime(startM + (durM > 0 ? durM : 0));
+  }
+
   if (loading || !state) {
     return (
       <div className="p-6 text-gray-600">
@@ -654,6 +719,7 @@ export default function DayPlanner() {
             <div className="flex items-center gap-3">
               {isAdmin ? (
                 <button
+                  style={{ display: "none" }}
                   onClick={() => setShowDistanceEditor(true)}
                   className="flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors border border-gray-300 text-sm"
                 >
@@ -698,7 +764,6 @@ export default function DayPlanner() {
                     </div>
                   </div>
 
-                  {/* ✅ نمرر lockDateISO لعرض أيقونة المنع على السواقين في يوم الإجازة */}
                   <ResourcePool
                     title="Tractors"
                     icon={Truck}
@@ -733,6 +798,7 @@ export default function DayPlanner() {
                 onAddJobSlot={addNewJobAtSlot}
                 onUpdateJob={updateJob}
                 onDeleteJob={deleteJob}
+                onDuplicateJob={startDuplicateJob}
                 onOpenJob={openJobModal}
               />
             </div>
@@ -774,6 +840,102 @@ export default function DayPlanner() {
             closeJobModal();
           }}
         />
+      )}
+
+      {/* ✅ مودال نسخ الجوب */}
+      {isAdmin && duplicateJobConfig && (
+        <div className="fixed inset-0 z-[900] flex items-center justify-center bg-black/30">
+          <div className="bg-white rounded-xl shadow-lg border border-gray-200 w-full max-w-sm p-4 space-y-3">
+            <h3 className="text-sm font-semibold text-gray-900">
+              Duplicate job
+            </h3>
+            <p className="text-xs text-gray-500">
+              اختر اليوم ووقت البداية والمدة للجوب المنسوخة.
+            </p>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-[11px] text-gray-600 mb-1">
+                  Date
+                </label>
+                <input
+                  type="date"
+                  value={duplicateJobConfig.date || ""}
+                  onChange={(e) =>
+                    setDuplicateJobConfig((prev) => ({
+                      ...prev,
+                      date: e.target.value,
+                    }))
+                  }
+                  className="w-full border border-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] text-gray-600 mb-1">
+                    Start time
+                  </label>
+                  <input
+                    type="time"
+                    value={duplicateJobConfig.start || ""}
+                    onChange={(e) =>
+                      setDuplicateJobConfig((prev) => ({
+                        ...prev,
+                        start: e.target.value,
+                      }))
+                    }
+                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-gray-600 mb-1">
+                    Duration (hours)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    value={duplicateJobConfig.durationHours}
+                    onChange={(e) =>
+                      setDuplicateJobConfig((prev) => ({
+                        ...prev,
+                        durationHours: e.target.value,
+                      }))
+                    }
+                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              {duplicateEndTime && (
+                <div className="text-[11px] text-gray-500">
+                  End time:{" "}
+                  <span className="font-medium text-gray-800">
+                    {duplicateEndTime}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={cancelDuplicateJob}
+                className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDuplicateJob}
+                className="px-3 py-1.5 rounded-lg bg-blue-600 text-xs text-white hover:bg-blue-700"
+              >
+                Create copy
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
