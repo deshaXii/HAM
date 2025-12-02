@@ -190,10 +190,11 @@ function buildJobEndDate(dateISO, start, durationHours) {
 /**
  * true لو الجوب كله في الماضي (نهاية المدة أقل من الوقت الحالي)
  */
+// end.getTime() <= Date.now();
 function isJobCompletelyInPast(dateISO, start, durationHours) {
   const end = buildJobEndDate(dateISO, start, durationHours);
   if (!end) return false;
-  return end.getTime() <= Date.now();
+  return false;
 }
 
 /* ===== component ===== */
