@@ -16,7 +16,7 @@ const { auth } = require("./middleware/auth");
 const { me } = require("./controllers/authController");
 
 const app = express();
-
+app.set("trust proxy", 1);
 app.use(
   cors({
     origin: "*",
