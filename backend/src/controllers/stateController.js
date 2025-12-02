@@ -1,6 +1,7 @@
 // backend/src/controllers/stateController.js
 const { pool } = require("../config/db");
 const { broadcast } = require("../realtime/sse");
+
 /**
  * ده الـ default اللي هنرجعله لو الـ DB فاضية أو JSON بايظ
  */
@@ -38,6 +39,7 @@ function normalizeState(raw) {
       ...t,
       types: Array.isArray(t.types) ? t.types : t.type ? [t.type] : [],
     }));
+
   return {
     ...DEFAULT_STATE,
     ...src,
@@ -133,26 +135,32 @@ function mergeStates(dbState, incoming) {
 }
 
 async function getState(req, res) {
-  const [rows] = await pool.query(
-    "SELECT data, updated_at FROM planner_state WHERE id = 1"
-  );
-  if (!rows.length || !rows[0].data) {
-    return res.json(DEFAULT_STATE);
-  }
   try {
-    const parsed = JSON.parse(rows[0].data);
-    // نرجع normalized عشان الفرونت يبقى دايمًا مبسوط
-    const safe = normalizeState(parsed);
-    return res.json(safe);
-  } catch (e) {
-    console.error("Failed to parse planner_state:", e);
-    return res.json(DEFAULT_STATE);
+    const [rows] = await pool.query(
+      "SELECT data, updated_at FROM planner_state WHERE id = 1"
+    );
+
+    if (!rows.length || !rows[0].data) {
+      return res.json(DEFAULT_STATE);
+    }
+
+    try {
+      const parsed = JSON.parse(rows[0].data);
+      const safe = normalizeState(parsed);
+      return res.json(safe);
+    } catch (e) {
+      console.error("Failed to parse planner_state:", e);
+      return res.json(DEFAULT_STATE);
+    }
+  } catch (err) {
+    console.error("getState error:", err);
+    return res.status(500).json({ error: "Failed to load state" });
   }
 }
 
 async function saveState(req, res) {
   try {
-    // 1) هات اللي في الداتابيز الأول
+    // 1) هات اللي في الداتابيز الأول (لو موجود)
     const [rows] = await pool.query(
       "SELECT data FROM planner_state WHERE id = 1"
     );
@@ -161,20 +169,29 @@ async function saveState(req, res) {
 
     // 2) دمج آمن
     const merged = mergeStates(dbState, req.body || {});
+    const json = JSON.stringify(merged);
 
-    // 3) خزّن
+    // 3) UPSERT: لو مفيش صف id=1 هيعمل INSERT، لو موجود هيعمل UPDATE
     await pool.query(
-      "UPDATE planner_state SET data = ?, updated_at = NOW() WHERE id = 1",
-      [JSON.stringify(merged)]
+      `
+        INSERT INTO planner_state (id, data, updated_at)
+        VALUES (1, ?, NOW())
+        ON DUPLICATE KEY UPDATE
+          data = VALUES(data),
+          updated_at = VALUES(updated_at)
+      `,
+      [json]
     );
 
-    // 4) مهم جدًا: نرجّع الـ state نفسه مش {ok:true}
+    // 4) ابعت event للـ SSE عشان أي عميل تاني يعمل refetch
+    broadcast("state:updated", { updatedAt: Date.now() });
+
+    // 5) رجّع الـ state نفسه
     return res.json(merged);
   } catch (err) {
     console.error("saveState error:", err);
-    broadcast("state:updated", { updatedAt: Date.now() });
     return res.status(500).json({ error: "Failed to save state" });
   }
 }
-//  s
+
 module.exports = { getState, saveState };
