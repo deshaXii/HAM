@@ -24,7 +24,7 @@ async function uploadDriverPhoto(req, res) {
     }
   }
 
-  const url = `${base}/uploads/${req.file.filename}`;
+  const url = `${base}/api/uploads/${req.file.filename}`;
 
   // مش هنخزنها في DB هنا، الفرونت اصلاً بيستخدمها مباشرة
   return res.json({ url });
