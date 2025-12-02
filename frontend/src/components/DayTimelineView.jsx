@@ -58,9 +58,9 @@ export default function DayTimelineView({
 
   const TOTAL_MINUTES = 24 * 60;
   const MIN_WIDTH_PCT = 7;
-  const LANE_HEIGHT = 120;
-  const LANE_GAP = 24;
-  const MIN_TIMELINE_HEIGHT = 560;
+  const LANE_HEIGHT = 10;
+  const LANE_GAP = 70;
+  const MIN_TIMELINE_HEIGHT = 960;
 
   // 1) فلترة الشغلانات على اليوم + فلاتر resources
   let todaysJobs = (state.jobs || []).filter((job) => job.date === date);

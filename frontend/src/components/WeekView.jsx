@@ -1,3 +1,4 @@
+// src/components/WeekView.jsx
 import React from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { Plus, AlertTriangle } from "lucide-react";
@@ -12,7 +13,7 @@ const STATUS_COLORS = {
   complete: "bg-green-600",
 };
 
-// ===== Helpers (محلية 100%) =====
+/* ===== Helpers (محلية 100%) ===== */
 function toISODateLocal(d) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -51,34 +52,81 @@ function getWeekDays(weekStartISO) {
   }
   return days;
 }
-// ===== end helpers =====
 
-function computeJobStatus(job) {
-  if (
-    !job ||
-    !job.date ||
-    !job.start ||
-    !job.durationHours ||
-    !job.pickup ||
-    !job.dropoff ||
-    !Array.isArray(job.driverIds) ||
-    job.driverIds.length === 0 ||
-    !job.tractorId
-  ) {
-    return "incomplete";
+/* ===== تحذيرات الجوب والوان الكارد ===== */
+export function getJobWarnings(job, resources) {
+  const drivers = resources?.drivers || [];
+  const tractors = resources?.tractors || [];
+  const trailers = resources?.trailers || [];
+
+  const getDriver = (id) => drivers.find((d) => d.id === id);
+  const getTractor = (id) => tractors.find((t) => t.id === id);
+  const getTrailer = (id) => trailers.find((t) => t.id === id);
+
+  const out = [];
+
+  if (job.slot === "night") {
+    (job.driverIds || []).forEach((driverId) => {
+      const driver = getDriver(driverId);
+      if (driver && !driver.canNight)
+        out.push(`${driver.name} cannot work night shifts`);
+    });
   }
-  const start = new Date(`${job.date}T${job.start}:00`);
-  const end = new Date(
-    start.getTime() + (Number(job.durationHours) || 0) * 3600 * 1000
-  );
-  const now = new Date();
-  if (now >= end) return "complete";
-  if (now >= start && now < end) return "processed";
-  const oneHourBefore = new Date(start.getTime() - 60 * 60 * 1000);
-  if (now >= oneHourBefore && now < start) return "processed_soon";
-  return "waiting";
+
+  if ((job.driverIds || []).length > 1) {
+    const tractor = getTractor(job.tractorId);
+    if (tractor && !tractor.doubleManned)
+      out.push("Tractor not suitable for 2 drivers");
+  }
+
+  if (!job.tractorId) out.push("Missing tractor");
+  if (!job.trailerId) out.push("Missing trailer");
+  if (!job.driverIds || job.driverIds.length === 0) out.push("Missing driver");
+  if (!job.durationHours || job.durationHours === 0)
+    out.push("Missing duration");
+  if (!job.start) out.push("Missing start time");
+
+  return out;
 }
 
+function isJobCompleted(job) {
+  if (!job?.date) return false;
+
+  const [y, m, d] = String(job.date)
+    .split("-")
+    .map((n) => parseInt(n, 10));
+  if (!y || !m || !d) return false;
+
+  const [hhStr, mmStr] = String(job.start || "00:00").split(":");
+  const hh = parseInt(hhStr || "0", 10);
+  const mm = parseInt(mmStr || "0", 10);
+
+  const base = new Date();
+  base.setFullYear(y);
+  base.setMonth(m - 1);
+  base.setDate(d);
+  base.setHours(hh, mm || 0, 0, 0);
+
+  const durMs = (job.durationHours || 0) * 60 * 60 * 1000;
+  const end = new Date(base.getTime() + durMs);
+
+  return end.getTime() <= Date.now();
+}
+
+export function getJobBgClass(job, warnings) {
+  if (isJobCompleted(job)) {
+    // أخضر فاتح للجوب اللي خلص فعلاً
+    return "bg-green-50 border-green-300";
+  }
+  if (warnings && warnings.length > 0) {
+    // أصفر فاتح للجوب اللي ناقصه بيانات
+    return "bg-yellow-50 border-yellow-300";
+  }
+  // أبيض للجوب اللي بياناته كاملة ولسه ما اشتغلش
+  return "bg-white border-gray-200";
+}
+
+/* ===== Droppable slot ===== */
 function SlotDroppable({ dateISO, slot, children, highlight = false }) {
   const id = `slot|${dateISO}|${slot}`;
   const { setNodeRef, isOver } = useDroppable({ id });
@@ -97,6 +145,7 @@ function SlotDroppable({ dateISO, slot, children, highlight = false }) {
   );
 }
 
+/* ===== Job card (weekly) ===== */
 function JobCard({
   job,
   onOpen,
@@ -105,6 +154,7 @@ function JobCard({
   driverEntries,
   tractor,
   trailer,
+  warnings = [],
 }) {
   const trailerTypes = trailer
     ? Array.isArray(trailer.types)
@@ -115,6 +165,7 @@ function JobCard({
     : [];
   const trailerTypeLabels = labelsFor(trailerTypes);
 
+  const bgClass = getJobBgClass(job, warnings);
   const { setNodeRef, isOver } = useDroppable({ id: job.id });
 
   const start = job.start || (job.slot === "night" ? "20:00" : "08:00");
@@ -129,8 +180,8 @@ function JobCard({
   return (
     <div
       ref={setNodeRef}
-      className={`relative bg-white rounded-lg border shadow-sm p-3 mb-2 cursor-pointer transition-colors ${
-        isOver ? "border-blue-400 ring-2 ring-blue-100" : "border-gray-200"
+      className={`relative rounded-lg border shadow-sm p-3 mb-2 cursor-pointer transition-colors ${bgClass} ${
+        isOver ? "border-blue-400 ring-2 ring-blue-100" : ""
       }`}
       onClick={() => onOpen(job.id)}
     >
@@ -150,6 +201,7 @@ function JobCard({
           </button>
         )}
       </div>
+
       <div className="text-[11px] text-gray-500 mb-1">
         {start} • {dur}h
       </div>
@@ -208,6 +260,7 @@ function JobCard({
   );
 }
 
+/* (لو حبيت تستخدمها بعدين) */
 function StatusLegend() {
   const items = [
     ["incomplete", "Missing data"],
@@ -228,6 +281,7 @@ function StatusLegend() {
   );
 }
 
+/* ===== WeekView الرئيسي ===== */
 export default function WeekView({
   state,
   onAddJob,
@@ -304,6 +358,7 @@ export default function WeekView({
                 </div>
               </Link>
 
+              {/* DAY SLOT */}
               <div className="flex items-center justify-between mb-1">
                 <span className="text-[10px] font-semibold text-gray-500">
                   DAY
@@ -338,12 +393,20 @@ export default function WeekView({
                             : null;
                         })
                         .filter(Boolean);
+
                       const tractor = (state.tractors || []).find(
                         (t) => String(t.id) === String(job.tractorId)
                       );
                       const trailer = (state.trailers || []).find(
                         (t) => String(t.id) === String(job.trailerId)
                       );
+
+                      const warnings = getJobWarnings(job, {
+                        drivers: state.drivers || [],
+                        tractors: state.tractors || [],
+                        trailers: state.trailers || [],
+                      });
+
                       return (
                         <JobCard
                           key={job.id}
@@ -354,6 +417,7 @@ export default function WeekView({
                           driverEntries={driverEntries}
                           tractor={tractor}
                           trailer={trailer}
+                          warnings={warnings}
                         />
                       );
                     })
@@ -361,6 +425,7 @@ export default function WeekView({
                 </div>
               </SlotDroppable>
 
+              {/* NIGHT SLOT */}
               <div className="flex items-center justify-between mb-1 mt-1">
                 <span className="text-[10px] font-semibold text-gray-500">
                   NIGHT
@@ -395,12 +460,20 @@ export default function WeekView({
                             : null;
                         })
                         .filter(Boolean);
+
                       const tractor = (state.tractors || []).find(
                         (t) => String(t.id) === String(job.tractorId)
                       );
                       const trailer = (state.trailers || []).find(
                         (t) => String(t.id) === String(job.trailerId)
                       );
+
+                      const warnings = getJobWarnings(job, {
+                        drivers: state.drivers || [],
+                        tractors: state.tractors || [],
+                        trailers: state.trailers || [],
+                      });
+
                       return (
                         <JobCard
                           key={job.id}
@@ -411,6 +484,7 @@ export default function WeekView({
                           driverEntries={driverEntries}
                           tractor={tractor}
                           trailer={trailer}
+                          warnings={warnings}
                         />
                       );
                     })

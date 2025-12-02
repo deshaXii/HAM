@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import useServerEventRefetch from "../hooks/useServerEventRefetch";
 import MultiTypeSelect from "./MultiTypeSelect";
 import { TRAILER_TAXONOMY } from "../constants/trailerTaxonomy";
+import { TRACTOR_TAXONOMY } from "../constants/tractorTaxonomy";
 import {
   Plus,
   Trash2,
@@ -399,6 +400,7 @@ export default function Admin() {
                     <tr>
                       <Th>Code</Th>
                       <Th>Plate</Th>
+                      <Th>Type(s)</Th>
                       <Th center>Double Manned</Th>
                       <Th right>Actions</Th>
                     </tr>
@@ -437,6 +439,22 @@ export default function Admin() {
                             }
                             className="input-field text-xs md:text-sm"
                             placeholder="License plate..."
+                          />
+                        </Td>
+                        <Td>
+                          <MultiTypeSelect
+                            taxonomy={TRACTOR_TAXONOMY}
+                            value={
+                              Array.isArray(tractor.types) ? tractor.types : []
+                            }
+                            onChange={(vals) =>
+                              updateDraftItem(
+                                "tractors",
+                                tractor.id,
+                                "types",
+                                vals
+                              )
+                            }
                           />
                         </Td>
                         <Td center>

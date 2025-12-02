@@ -1,4 +1,6 @@
+// src/components/Planner.jsx
 import React, { useState, useEffect } from "react";
+import { validateWholeJob } from "../lib/jobValidation";
 import {
   DndContext,
   pointerWithin,
@@ -61,13 +63,7 @@ function timeToMinutes(t) {
     .map((x) => parseInt(x || "0", 10));
   return h * 60 + (m || 0);
 }
-function rangesOverlap(startA, durA, startB, durB) {
-  const a1 = timeToMinutes(startA);
-  const a2 = a1 + (durA || 0) * 60;
-  const b1 = timeToMinutes(startB);
-  const b2 = b1 + (durB || 0) * 60;
-  return Math.max(a1, b1) < Math.min(a2, b2);
-}
+
 function defaultStartForSlot(slot) {
   return slot === "night" ? "20:00" : "08:00";
 }
@@ -75,169 +71,40 @@ function shortIso(x) {
   return String(x || "").slice(0, 10);
 }
 
-/* ===== توفر السائقين (نفس منطق DayPlanner) ===== */
-const DAY_NAME_TO_NUM = {
-  sun: 0,
-  mon: 1,
-  tue: 2,
-  wed: 3,
-  thu: 4,
-  fri: 5,
-  sat: 6,
-};
-function normalizeWeekAvailability(wa) {
-  if (wa === null || wa === undefined) return null; // غير معرّف = متاح كل الأيام
-  if (Array.isArray(wa)) {
-    return wa
-      .map((v) => {
-        if (typeof v === "number") return v;
-        const s = String(v).toLowerCase();
-        if (DAY_NAME_TO_NUM.hasOwnProperty(s)) return DAY_NAME_TO_NUM[s];
-        const n = parseInt(s, 10);
-        return Number.isNaN(n) ? null : n;
-      })
-      .filter((x) => x !== null);
-  }
-  if (typeof wa === "object") {
-    return Object.keys(wa)
-      .filter((k) => !!wa[k])
-      .map((k) => {
-        const s = String(k).toLowerCase();
-        if (DAY_NAME_TO_NUM.hasOwnProperty(s)) return DAY_NAME_TO_NUM[s];
-        const n = parseInt(s, 10);
-        return Number.isNaN(n) ? null : n;
-      })
-      .filter((x) => x !== null);
-  }
-  return null;
-}
-function driverWorksOnDay(driver, isoDate) {
-  const list = normalizeWeekAvailability(driver?.weekAvailability);
-  if (list === null) return true; // غير معرّفة → متاح كل الأيام
-  if (Array.isArray(list) && list.length === 0) return false; // فاضية → غير متاح إطلاقًا
-  const weekday = new Date(shortIso(isoDate)).getDay();
-  return list.includes(weekday);
-}
-function driverOnLeave(driver, isoDate) {
-  const arr =
-    Array.isArray(driver?.leaves) && driver.leaves.length
-      ? driver.leaves
-      : typeof driver?.leaves === "string" && driver.leaves.trim()
-      ? driver.leaves.split(",").map((s) => s.trim())
-      : [];
-  const normalized = arr.map((d) => shortIso(d));
-  return normalized.includes(shortIso(isoDate));
-}
-function getDriverBlockReason(driver, job) {
-  if (!driver) return "driver-missing";
-  const dayISO = shortIso(job.date);
-  if (!driverWorksOnDay(driver, dayISO)) return `Driver is off on ${dayISO}.`;
-  if (driverOnLeave(driver, dayISO)) return `Driver is on leave on ${dayISO}.`;
-  if (job.slot === "night" && driver?.canNight === false)
-    return "Driver cannot take night jobs.";
-  return null;
-}
-function isResourceBusy(state, excludeJobId, dateISO, start, dur, predicateFn) {
-  return (state.jobs || []).some((other) => {
-    if (other.id === excludeJobId) return false;
-    if (shortIso(other.date) !== shortIso(dateISO)) return false;
-    return (
-      predicateFn(other) &&
-      rangesOverlap(start, dur, other.start, other.durationHours)
-    );
-  });
-}
-function exceedsDriverLimitForTractor(state, job, newDriverId) {
-  const tractor = (state.tractors || []).find(
-    (t) => String(t.id) === String(job.tractorId)
-  );
-  const currentDrivers = Array.isArray(job.driverIds) ? job.driverIds : [];
-  const alreadyIn = currentDrivers.includes(newDriverId);
-  if (alreadyIn) return false;
-  const afterCount = currentDrivers.length + 1;
-  if (!tractor) return afterCount > 2; // لو لسه ماختارش تراكتور، اسمح بحد أقصى 2 مؤقتاً
-  const tractorAllowsTwo = tractor?.doubleManned === true;
-  if (!tractorAllowsTwo && afterCount > 1) return true;
-  if (tractorAllowsTwo && afterCount > 2) return true;
-  return false;
-}
-function validateWholeJob(state, candidateJob, originalJobId) {
-  const start = candidateJob.start || defaultStartForSlot(candidateJob.slot);
-  const dur = candidateJob.durationHours || 0;
+/**
+ * احسب وقت نهاية الجوب في صورة Date
+ */
+function buildJobEndDate(dateISO, start, durationHours) {
+  if (!dateISO) return null;
+  const parts = String(dateISO).split("-");
+  if (parts.length < 3) return null;
+  const [yStr, mStr, dStr] = parts;
+  const y = parseInt(yStr, 10);
+  const m = parseInt(mStr, 10);
+  const d = parseInt(dStr, 10);
+  if (!y || !m || !d) return null;
 
-  if (Array.isArray(candidateJob.driverIds)) {
-    // enforce availability + leaves + night
-    for (const dId of candidateJob.driverIds) {
-      const driver = (state.drivers || []).find(
-        (d) => String(d.id) === String(dId)
-      );
-      const reason = getDriverBlockReason(driver, candidateJob);
-      if (reason && reason !== "driver-missing") {
-        return { ok: false, reason };
-      }
-      const busy = isResourceBusy(
-        state,
-        originalJobId,
-        candidateJob.date,
-        start,
-        dur,
-        (other) =>
-          Array.isArray(other.driverIds) && other.driverIds.includes(dId)
-      );
-      if (busy) {
-        return {
-          ok: false,
-          reason: `Driver "${
-            driver?.name || dId
-          }" is already busy on ${shortIso(
-            candidateJob.date
-          )} at ${start} for ${dur}h.`,
-        };
-      }
-      if (exceedsDriverLimitForTractor(state, candidateJob, dId)) {
-        return {
-          ok: false,
-          reason: "This tractor does not allow more drivers for this job.",
-        };
-      }
-    }
-  }
+  const [hhStr, mmStr] = String(start || "00:00").split(":");
+  const hh = parseInt(hhStr || "0", 10);
+  const mm = parseInt(mmStr || "0", 10);
 
-  if (candidateJob.tractorId) {
-    const busyTr = isResourceBusy(
-      state,
-      originalJobId,
-      candidateJob.date,
-      start,
-      dur,
-      (o) => String(o.tractorId) === String(candidateJob.tractorId)
-    );
-    if (busyTr) {
-      return {
-        ok: false,
-        reason: "This tractor is already busy at that time.",
-      };
-    }
-  }
+  const base = new Date();
+  base.setFullYear(y);
+  base.setMonth(m - 1);
+  base.setDate(d);
+  base.setHours(hh, mm || 0, 0, 0);
 
-  if (candidateJob.trailerId) {
-    const busyTrl = isResourceBusy(
-      state,
-      originalJobId,
-      candidateJob.date,
-      start,
-      dur,
-      (o) => String(o.trailerId) === String(candidateJob.trailerId)
-    );
-    if (busyTrl) {
-      return {
-        ok: false,
-        reason: "This trailer is already busy at that time.",
-      };
-    }
-  }
+  const durMs = (durationHours || 0) * 60 * 60 * 1000;
+  return new Date(base.getTime() + durMs);
+}
 
-  return { ok: true };
+/**
+ * true لو الجوب كله في الماضي (نهاية المدة أقل من الوقت الحالي)
+ */
+function isJobCompletelyInPast(dateISO, start, durationHours) {
+  const end = buildJobEndDate(dateISO, start, durationHours);
+  if (!end) return false;
+  return end.getTime() <= Date.now();
 }
 
 /* ===== بناء حالة آمنة من الـ API ===== */
@@ -247,6 +114,7 @@ function normalizeJobSlot(job) {
   const normalizedSlot = hour >= 20 || hour < 8 ? "night" : "day";
   return { ...job, slot: normalizedSlot };
 }
+
 function buildSafeState(raw) {
   const src = raw || {};
   const jobs = Array.isArray(src.jobs) ? src.jobs.map(normalizeJobSlot) : [];
@@ -278,8 +146,44 @@ function buildSafeState(raw) {
             },
             trailerDayCost: { reefer: 35, box: 20, taut: 18, chassis: 15 },
           },
-    weekStart:
-      src.weekStart || toISODateLocal(getStartOfWeekMonday(new Date())),
+    // ✅ هنا التعديل المهم:
+    // لو الـ state فيها weekStart هنستخدمه (من النavigation)
+    // لو مش موجود هنخلي default = النهارده
+    weekStart: src.weekStart || toISODateLocal(new Date()),
+  };
+}
+
+/* ========== normalize قبل الإرسال للباك إند (نفس فكرة DayPlanner) ========== */
+function toBackendLocation(val) {
+  if (!val) return "";
+  if (typeof val === "string") return val;
+  return val.name || val.id || "";
+}
+
+function normalizeStateForBackend(state) {
+  const normJobs = (state.jobs || []).map((job) => {
+    const j = { ...job };
+
+    j.pickup = toBackendLocation(j.pickup);
+    j.dropoff = toBackendLocation(j.dropoff);
+
+    if (j.tractorId === "" || j.tractorId === undefined) {
+      j.tractorId = null;
+    }
+    if (j.trailerId === "" || j.trailerId === undefined) {
+      j.trailerId = null;
+    }
+
+    return j;
+  });
+
+  return {
+    ...state,
+    jobs: normJobs,
+    drivers: Array.isArray(state.drivers) ? state.drivers : [],
+    tractors: Array.isArray(state.tractors) ? state.tractors : [],
+    trailers: Array.isArray(state.trailers) ? state.trailers : [],
+    locations: Array.isArray(state.locations) ? state.locations : [],
   };
 }
 
@@ -312,7 +216,7 @@ export default function Planner() {
         const apiState = await apiGetState();
         const safe = buildSafeState(apiState);
         setState(safe);
-        // default preview = Monday of current week
+        // default preview = أول يوم في الأسبوع الحالي
         const weekDays = getWeekDaysFromISO(safe.weekStart);
         setPreviewDateISO(toISODateLocal(weekDays[0]));
       } catch (e) {
@@ -327,16 +231,44 @@ export default function Planner() {
   async function persistIfAdmin(nextState) {
     const safe = buildSafeState(nextState);
     setState(safe);
+
     if (isAdmin) {
       setSaving(true);
       try {
-        await apiSaveState(safe);
+        const backendSafe = normalizeStateForBackend(safe);
+        await apiSaveState(backendSafe);
       } catch (e) {
         console.error("failed saving planner state", e);
       } finally {
         setSaving(false);
       }
     }
+  }
+
+  function rangesOverlap(startA, durA, startB, durB) {
+    const a1 = timeToMinutes(startA);
+    const a2 = a1 + (durA || 0) * 60;
+    const b1 = timeToMinutes(startB);
+    const b2 = b1 + (durB || 0) * 60;
+    return Math.max(a1, b1) < Math.min(a2, b2);
+  }
+
+  function isResourceBusy(
+    stateObj,
+    excludeJobId,
+    dateISO,
+    start,
+    dur,
+    predicateFn
+  ) {
+    return (stateObj.jobs || []).some((other) => {
+      if (other.id === excludeJobId) return false;
+      if (shortIso(other.date) !== shortIso(dateISO)) return false;
+      return (
+        predicateFn(other) &&
+        rangesOverlap(start, dur, other.start, other.durationHours)
+      );
+    });
   }
 
   function openJobModal(jobId) {
@@ -372,6 +304,18 @@ export default function Planner() {
       pricing: { type: "fixed", value: "" },
       notes: "",
     };
+
+    if (
+      isJobCompletelyInPast(
+        newJob.date,
+        newJob.start,
+        newJob.durationHours || 0
+      )
+    ) {
+      alert("You cannot add a job completely in the past.");
+      return;
+    }
+
     const check = validateWholeJob(state, newJob, newJob.id);
     if (!check.ok) {
       alert(check.reason);
@@ -388,6 +332,22 @@ export default function Planner() {
     if (!oldJob) return;
 
     const candidate = { ...oldJob, ...updates };
+
+    const wasPast = isJobCompletelyInPast(
+      oldJob.date,
+      oldJob.start || defaultStartForSlot(oldJob.slot),
+      oldJob.durationHours || 0
+    );
+    const willBePast = isJobCompletelyInPast(
+      candidate.date,
+      candidate.start || defaultStartForSlot(candidate.slot),
+      candidate.durationHours || 0
+    );
+    if (!wasPast && willBePast) {
+      alert("You cannot move a job completely into the past.");
+      return;
+    }
+
     const check = validateWholeJob(state, candidate, jobId);
     if (!check.ok) {
       alert(check.reason);
@@ -426,6 +386,21 @@ export default function Planner() {
       start: defaultStartForSlot(slot),
     };
 
+    const wasPast = isJobCompletelyInPast(
+      job.date,
+      job.start || defaultStartForSlot(job.slot),
+      job.durationHours || 0
+    );
+    const willBePast = isJobCompletelyInPast(
+      proposed.date,
+      proposed.start,
+      proposed.durationHours || 0
+    );
+    if (!wasPast && willBePast) {
+      alert("You cannot move a job completely into the past.");
+      return;
+    }
+
     const check = validateWholeJob(state, proposed, jobId);
     if (!check.ok) {
       alert(check.reason);
@@ -453,12 +428,6 @@ export default function Planner() {
       );
       if (!driver) return;
 
-      const blockReason = getDriverBlockReason(driver, job);
-      if (blockReason && blockReason !== "driver-missing") {
-        alert(blockReason);
-        return;
-      }
-
       const busy = isResourceBusy(
         state,
         job.id,
@@ -474,11 +443,6 @@ export default function Planner() {
             job.date
           )} at ${start} for ${dur}h.`
         );
-        return;
-      }
-
-      if (exceedsDriverLimitForTractor(state, job, resourceId)) {
-        alert("This tractor does not allow more drivers for this job.");
         return;
       }
 
@@ -605,11 +569,7 @@ export default function Planner() {
       const driver = (state.drivers || []).find(
         (d) => String(d.id) === String(resourceId)
       );
-      const blockReason = getDriverBlockReason(driver || {}, newJob);
-      if (blockReason && blockReason !== "driver-missing") {
-        alert(blockReason);
-        return;
-      }
+      if (!driver) return;
 
       const busy = isResourceBusy(
         state,
@@ -668,6 +628,17 @@ export default function Planner() {
       newJob.trailerId = resourceId;
     }
 
+    if (
+      isJobCompletelyInPast(
+        newJob.date,
+        newJob.start,
+        newJob.durationHours || 0
+      )
+    ) {
+      alert("You cannot add a job completely in the past.");
+      return;
+    }
+
     const check = validateWholeJob(state, newJob, newJob.id);
     if (!check.ok) {
       alert(check.reason);
@@ -705,7 +676,6 @@ export default function Planner() {
     }
 
     if (isResource) {
-      // resource-<type>-<realId with possible dashes>
       const getRes = (id) => {
         if (id.startsWith("resource-driver-"))
           return { type: "driver", id: id.slice("resource-driver-".length) };
@@ -763,7 +733,6 @@ export default function Planner() {
     } else {
       setState({ ...state, weekStart: iso });
     }
-    // تحديث preview على حسب الإسبوع الجديد
     const days = getWeekDaysFromISO(iso);
     setPreviewDateISO(toISODateLocal(days[0]));
   }
@@ -849,7 +818,7 @@ export default function Planner() {
               <div className="flex items-center gap-2 font-semibold text-gray-800 text-sm">
                 <Calendar size={16} className="text-gray-500" />
                 <span>
-                  Week of{" "}
+                  Week starting{" "}
                   {currentWeekStart.toLocaleDateString(undefined, {
                     year: "numeric",
                     month: "short",
@@ -978,6 +947,7 @@ export default function Planner() {
           tractors={state.tractors || []}
           trailers={state.trailers || []}
           locations={state.locations || []}
+          allJobs={state.jobs || []}
           isAdmin={isAdmin}
           onClose={closeJobModal}
           onSave={(updates) => {

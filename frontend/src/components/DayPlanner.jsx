@@ -1,5 +1,8 @@
+// src/components/DayPlanner.jsx
 import React, { useState, useEffect } from "react";
 import { Navigate, useParams } from "react-router-dom";
+import { validateWholeJob } from "../lib/jobValidation";
+
 import {
   DndContext,
   pointerWithin,
@@ -26,6 +29,7 @@ function timeToMinutes(t) {
     .map((x) => parseInt(x || "0", 10));
   return h * 60 + (m || 0);
 }
+
 function minutesToTime(mins) {
   const total = ((mins % (24 * 60)) + 24 * 60) % (24 * 60);
   const h = Math.floor(total / 60);
@@ -33,20 +37,16 @@ function minutesToTime(mins) {
   const pad = (n) => (n < 10 ? `0${n}` : String(n));
   return `${pad(h)}:${pad(m)}`;
 }
-function rangesOverlap(startA, durA, startB, durB) {
-  const a1 = timeToMinutes(startA);
-  const a2 = a1 + (durA || 0) * 60;
-  const b1 = timeToMinutes(startB);
-  const b2 = b1 + (durB || 0) * 60;
-  return Math.max(a1, b1) < Math.min(a2, b2);
-}
+
 function slotDurationHours(slotKey) {
   return slotKey === "flex" ? 8 : 4;
 }
+
 function inferWeekSlotFromSlotKey(slotKey) {
   if (["20-24", "00-04", "04-08"].includes(slotKey)) return "night";
   return "day";
 }
+
 function startTimeFromSlotKey(slotKey) {
   const map = {
     "00-04": "00:00",
@@ -126,209 +126,7 @@ function normalizeStateFromApi(apiState) {
   };
 }
 
-/* ===== driver availability (موحّد مع Planner) ===== */
-const DAY_NAME_TO_NUM = {
-  sun: 0,
-  mon: 1,
-  tue: 2,
-  wed: 3,
-  thu: 4,
-  fri: 5,
-  sat: 6,
-};
-
-function shortIso(x) {
-  return String(x || "").slice(0, 10);
-}
-
-function normalizeWeekAvailability(wa) {
-  if (wa === null || wa === undefined) return null; // يعني متاح كل الأيام
-  if (Array.isArray(wa)) {
-    return wa
-      .map((v) => {
-        if (typeof v === "number") return v;
-        const s = String(v).toLowerCase();
-        if (DAY_NAME_TO_NUM.hasOwnProperty(s)) return DAY_NAME_TO_NUM[s];
-        const n = parseInt(s, 10);
-        return Number.isNaN(n) ? null : n;
-      })
-      .filter((x) => x !== null);
-  }
-  if (typeof wa === "object") {
-    return Object.keys(wa)
-      .filter((k) => !!wa[k])
-      .map((k) => {
-        const s = String(k).toLowerCase();
-        if (DAY_NAME_TO_NUM.hasOwnProperty(s)) return DAY_NAME_TO_NUM[s];
-        const n = parseInt(s, 10);
-        return Number.isNaN(n) ? null : n;
-      })
-      .filter((x) => x !== null);
-  }
-  return null;
-}
-
-function driverWorksOnDay(driver, isoDate) {
-  const list = normalizeWeekAvailability(driver?.weekAvailability);
-  if (list === null) return true; // غير معرّفة → متاح كل الأيام
-  if (Array.isArray(list) && list.length === 0) return false; // مصفوفة فاضية → غير متاح إطلاقًا
-  const weekdayJs = new Date(shortIso(isoDate)).getDay();
-  return list.includes(weekdayJs);
-}
-
-function driverOnLeave(driver, isoDate) {
-  const arr =
-    Array.isArray(driver?.leaves) && driver.leaves.length
-      ? driver.leaves
-      : typeof driver?.leaves === "string" && driver.leaves.trim()
-      ? driver.leaves.split(",").map((s) => s.trim())
-      : [];
-  const normalized = arr.map((d) => shortIso(d));
-  return normalized.includes(shortIso(isoDate));
-}
-
-function driverAllowedForJob(driver, job) {
-  if (job.slot === "night" && driver?.canNight === false) return false;
-  if (!driverWorksOnDay(driver || {}, job.date)) return false;
-  if (driverOnLeave(driver || {}, job.date)) return false;
-  return true;
-}
-
-/* ==== fixed blocks ==== */
-const FIXED_BLOCK_STARTS = [
-  "00:00",
-  "04:00",
-  "08:00",
-  "12:00",
-  "16:00",
-  "20:00",
-];
-
-function isFixed4hBlock(job) {
-  return FIXED_BLOCK_STARTS.includes(job.start);
-}
-
-/**
- * المدة الفعّالة بالساعات اللي بنستخدمها في فحص الـ overlap.
- * دلوقتي ما فيش limit 4 ساعات؛ بنستخدم durationHours زي ما هي.
- */
-function getEffectiveDurationHours(job) {
-  const real = Number(job.durationHours || 0);
-  if (!real || real < 0) return 0;
-  return real;
-}
-
-function isResourceBusy(jobs, excludeJobId, dateISO, start, dur, predicate) {
-  return (jobs || []).some((other) => {
-    if (other.id === excludeJobId) return false;
-    if (shortIso(other.date) !== shortIso(dateISO)) return false;
-    const otherDur = getEffectiveDurationHours(other);
-    return predicate(other) && rangesOverlap(start, dur, other.start, otherDur);
-  });
-}
-
-function exceedsDriverLimitForTractor(state, job, newDriverId) {
-  const tractor = (state.tractors || []).find((t) => t.id === job.tractorId);
-  const currentDrivers = Array.isArray(job.driverIds) ? job.driverIds : [];
-  const alreadyIn = currentDrivers.includes(newDriverId);
-  if (alreadyIn) return false;
-  const afterCount = currentDrivers.length + 1;
-  const tractorAllowsTwo = tractor?.doubleManned === true;
-  if (!tractorAllowsTwo && afterCount > 1) return true;
-  if (tractorAllowsTwo && afterCount > 2) return true;
-  return false;
-}
-
-/* ===== validator (يرفض السائق لو في إجازة / مش شغّال اليوم) ===== */
-function validateWholeJob(state, candidateJob, originalJobId) {
-  const start = candidateJob.start || "08:00";
-  const dur = getEffectiveDurationHours(candidateJob);
-
-  // drivers
-  if (Array.isArray(candidateJob.driverIds)) {
-    for (const dId of candidateJob.driverIds) {
-      const driver = (state.drivers || []).find((d) => d.id === dId);
-
-      if (!driverAllowedForJob(driver, candidateJob)) {
-        return {
-          ok: false,
-          reason: `Driver "${
-            driver?.name || dId
-          }" is not available on ${shortIso(candidateJob.date)}.`,
-        };
-      }
-
-      const busy = isResourceBusy(
-        state.jobs,
-        originalJobId,
-        candidateJob.date,
-        start,
-        dur,
-        (other) =>
-          Array.isArray(other.driverIds) && other.driverIds.includes(dId)
-      );
-      if (busy) {
-        return {
-          ok: false,
-          reason: `Driver "${
-            driver?.name || dId
-          }" is already busy on ${shortIso(
-            candidateJob.date
-          )} at ${start} for ${dur}h.`,
-        };
-      }
-      if (exceedsDriverLimitForTractor(state, candidateJob, dId)) {
-        return {
-          ok: false,
-          reason:
-            "This tractor does not allow more drivers for this job (2-man rule).",
-        };
-      }
-    }
-  }
-
-  // tractor
-  if (candidateJob.tractorId) {
-    const busyTr = isResourceBusy(
-      state.jobs,
-      originalJobId,
-      candidateJob.date,
-      start,
-      dur,
-      (o) => String(o.tractorId) === String(candidateJob.tractorId)
-    );
-    if (busyTr)
-      return {
-        ok: false,
-        reason: `This tractor is already busy on ${shortIso(
-          candidateJob.date
-        )} at ${start}.`,
-      };
-  }
-
-  // trailer
-  if (candidateJob.trailerId) {
-    const busyTrl = isResourceBusy(
-      state.jobs,
-      originalJobId,
-      candidateJob.date,
-      start,
-      dur,
-      (o) => String(o.trailerId) === String(candidateJob.trailerId)
-    );
-    if (busyTrl)
-      return {
-        ok: false,
-        reason: `This trailer is already busy on ${shortIso(
-          candidateJob.date
-        )} at ${start}.`,
-      };
-  }
-
-  return { ok: true };
-}
-
-/* ========== normalize before sending to backend ========== */
+/* ========== normalize قبل الإرسال للباك إند ========== */
 function toBackendLocation(val) {
   if (!val) return "";
   if (typeof val === "string") return val;
@@ -362,6 +160,42 @@ function normalizeStateForBackend(state) {
   };
 }
 
+/**
+ * احسب وقت نهاية الجوب في صورة Date
+ */
+function buildJobEndDate(dateISO, start, durationHours) {
+  if (!dateISO) return null;
+  const parts = String(dateISO).split("-");
+  if (parts.length < 3) return null;
+  const [yStr, mStr, dStr] = parts;
+  const y = parseInt(yStr, 10);
+  const m = parseInt(mStr, 10);
+  const d = parseInt(dStr, 10);
+  if (!y || !m || !d) return null;
+
+  const [hhStr, mmStr] = String(start || "00:00").split(":");
+  const hh = parseInt(hhStr || "0", 10);
+  const mm = parseInt(mmStr || "0", 10);
+
+  const base = new Date();
+  base.setFullYear(y);
+  base.setMonth(m - 1);
+  base.setDate(d);
+  base.setHours(hh, mm || 0, 0, 0);
+
+  const durMs = (durationHours || 0) * 60 * 60 * 1000;
+  return new Date(base.getTime() + durMs);
+}
+
+/**
+ * true لو الجوب كله في الماضي (نهاية المدة أقل من الوقت الحالي)
+ */
+function isJobCompletelyInPast(dateISO, start, durationHours) {
+  const end = buildJobEndDate(dateISO, start, durationHours);
+  if (!end) return false;
+  return end.getTime() <= Date.now();
+}
+
 /* ===== component ===== */
 export default function DayPlanner() {
   const { date } = useParams();
@@ -379,10 +213,20 @@ export default function DayPlanner() {
   const [searchTerm, setSearchTerm] = useState("");
   const [activeId, setActiveId] = useState(null);
   const [activeJobId, setActiveJobId] = useState(null);
-
+  const [isJobModalOpen, setIsJobModalOpen] = useState(false);
   // ✅ إعدادات مودال النسخ
   const [duplicateJobConfig, setDuplicateJobConfig] = useState(null);
   // duplicateJobConfig: { jobId, date, start, durationHours }
+
+  const openJobModal = (jobId) => {
+    setActiveJobId(jobId);
+    setIsJobModalOpen(true);
+  };
+
+  const closeJobModal = () => {
+    setIsJobModalOpen(false);
+    setActiveJobId(null);
+  };
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -395,6 +239,8 @@ export default function DayPlanner() {
         const apiState = await apiGetState();
         const fixedState = normalizeStateFromApi(apiState);
         setState(fixedState);
+        setIsJobModalOpen(false);
+        setActiveJobId(null);
       } catch (e) {
         console.error("failed to load day planner state", e);
         setState(null);
@@ -419,9 +265,6 @@ export default function DayPlanner() {
     }
   }
 
-  const openJobModal = (jobId) => setActiveJobId(jobId);
-  const closeJobModal = () => setActiveJobId(null);
-
   const updateJob = (jobId, updates) => {
     if (!state || !isAdmin) return;
     const oldJob = state.jobs.find((j) => j.id === jobId);
@@ -433,6 +276,21 @@ export default function DayPlanner() {
       state.tractors,
       state.trailers
     );
+
+    const wasPast = isJobCompletelyInPast(
+      oldJob.date,
+      oldJob.start || "00:00",
+      oldJob.durationHours || 0
+    );
+    const willBePast = isJobCompletelyInPast(
+      candidate.date,
+      candidate.start || "00:00",
+      candidate.durationHours || 0
+    );
+    if (!wasPast && willBePast) {
+      alert("You cannot move a job completely into the past.");
+      return;
+    }
 
     const check = validateWholeJob(state, candidate, jobId);
     if (!check.ok) {
@@ -495,8 +353,13 @@ export default function DayPlanner() {
     const hour = parseInt((newStart || "0").split(":")[0], 10);
     copy.slot = hour >= 20 || hour < 8 ? "night" : "day";
 
+    // ⛔ منع إنشاء نسخة كلها في الماضي
+    if (isJobCompletelyInPast(copy.date, copy.start, copy.durationHours || 0)) {
+      alert("You cannot create a duplicated job completely in the past.");
+      return;
+    }
+
     // مهم: هنا مش بنستبعد الجوب الأصلي من الفاليديشن
-    // عشان لو اخترت نفس الوقت ونفس الجرار/السواق، يعتبر تعارض.
     const check = validateWholeJob(state, copy, null);
     if (!check.ok) {
       alert(check.reason);
@@ -526,6 +389,19 @@ export default function DayPlanner() {
       trailerId: "",
       notes: "",
     };
+
+    // ⛔ منع إضافة جوب كله في الماضي
+    if (
+      isJobCompletelyInPast(
+        newJob.date,
+        newJob.start,
+        newJob.durationHours || 0
+      )
+    ) {
+      alert("You cannot add a job completely in the past.");
+      return;
+    }
+
     const check = validateWholeJob(state, newJob, newJob.id);
     if (!check.ok) {
       alert(check.reason);
@@ -652,6 +528,18 @@ export default function DayPlanner() {
         baseJob.trailerId = resourceRealId;
       }
 
+      // ⛔ منع إنشاء جوب كله في الماضي
+      if (
+        isJobCompletelyInPast(
+          baseJob.date,
+          baseJob.start,
+          baseJob.durationHours || 0
+        )
+      ) {
+        alert("You cannot add a job completely in the past.");
+        return;
+      }
+
       const check = validateWholeJob(state, baseJob, baseJob.id);
       if (!check.ok) {
         alert(check.reason);
@@ -741,9 +629,9 @@ export default function DayPlanner() {
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        <div className="max-w-[1800px] mx-auto p-6">
+        <div className="max-w=[1800px] mx-auto p-6">
           <div
-            className={` ${isAdmin ? "flex flex-col xl:flex-row gap-4" : ""}`}
+            className={`${isAdmin ? "flex flex-col xl:flex-row gap-4" : ""}`}
           >
             {isAdmin && (
               <div className="w-full xl:w-[240px] flex-shrink-0 flex flex-col gap-4">
@@ -822,13 +710,14 @@ export default function DayPlanner() {
         />
       )}
 
-      {activeJobId && (
+      {isJobModalOpen && activeJobId && (
         <JobModal
           job={state.jobs.find((j) => j.id === activeJobId)}
           drivers={state.drivers || []}
           tractors={state.tractors || []}
           trailers={state.trailers || []}
           locations={state.locations || []}
+          allJobs={state.jobs || []}
           isAdmin={isAdmin}
           onClose={closeJobModal}
           onSave={(updates) => {
