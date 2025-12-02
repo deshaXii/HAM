@@ -1,22 +1,32 @@
-// backend/controllers/uploadController.js (مثال)
 const path = require("path");
 
 async function uploadDriverPhoto(req, res) {
+  // multer حط الملف في req.file
   if (!req.file) {
     return res.status(400).json({ message: "No file uploaded" });
   }
 
-  // مهم: تأكد في app.js إنك عامل:
-  // app.set("trust proxy", true);
+  const host = req.get("host") || "";
+  const proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
 
-  const host = req.get("host"); // مثلا hamtransport.cloud
-  const proto = req.protocol || "http"; // http أو https حسب الطلب
-  const base =
-    process.env.BASE_URL ||
-    (host ? `${proto}://${host}` : "http://localhost:4000");
+  let base;
 
-  const url = `${base.replace(/\/+$/, "")}/uploads/${req.file.filename}`;
+  if (process.env.BASE_URL) {
+    // لو حطيت BASE_URL في الـ .env (مثلاً https://hamtransport.cloud/api)
+    base = process.env.BASE_URL.replace(/\/+$/, "");
+  } else {
+    // نبني الـ base من الريكوست نفسه
+    base = `${proto}://${host}`.replace(/\/+$/, "");
 
+    // في البرودكشن: الـ API ماشي تحت /api → نزودها في الـ base
+    if (host === "hamtransport.cloud" || host === "www.hamtransport.cloud") {
+      base += "/api";
+    }
+  }
+
+  const url = `${base}/uploads/${req.file.filename}`;
+
+  // مش هنخزنها في DB هنا، الفرونت اصلاً بيستخدمها مباشرة
   return res.json({ url });
 }
 
