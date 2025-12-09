@@ -61,8 +61,29 @@ export async function apiSaveState(nextState) {
     headers: authHeaders(),
     body: JSON.stringify(nextState),
   });
-  if (!res.ok) throw new Error("Failed to save state");
-  return res.json();
+  const text = await res.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = {};
+  }
+
+  if (!res.ok) {
+    const err = new Error(
+      data.message ||
+        data.error ||
+        `Failed to save state (status ${res.status})`
+    );
+    // نضيف شوية معلومات مفيدة للـ catch
+    err.status = res.status;
+    err.code =
+      data.error || (res.status === 409 ? "STATE_VERSION_CONFLICT" : "");
+    err.serverState = data.serverState;
+    throw err;
+  }
+
+  return data;
 }
 
 // -------- Notice board --------

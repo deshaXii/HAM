@@ -120,39 +120,52 @@ function normalizeJobSlot(job) {
 
 function buildSafeState(raw) {
   const src = raw || {};
+
   const jobs = Array.isArray(src.jobs) ? src.jobs.map(normalizeJobSlot) : [];
-  return {
-    jobs,
-    drivers: Array.isArray(src.drivers)
-      ? src.drivers.map((d) => ({
-          ...d,
-          rating: Number.isFinite(Number(d?.rating)) ? Number(d.rating) : 0,
-        }))
-      : [],
-    tractors: Array.isArray(src.tractors) ? src.tractors : [],
-    trailers: Array.isArray(src.trailers) ? src.trailers : [],
-    locations: Array.isArray(src.locations) ? src.locations : [],
-    distanceKm:
-      typeof src.distanceKm === "object" && src.distanceKm !== null
-        ? src.distanceKm
-        : {},
-    settings:
-      typeof src.settings === "object" && src.settings !== null
-        ? src.settings
-        : {
-            rates: {
-              loadedKmRevenue: 1.4,
-              emptyKmCost: 0.6,
-              tractorKmCostLoaded: 0.3,
-              driverHourCost: 22.5,
-              nightPremiumPct: 25,
-            },
-            trailerDayCost: { reefer: 35, box: 20, taut: 18, chassis: 15 },
+
+  const drivers = Array.isArray(src.drivers)
+    ? src.drivers.map((d) => ({
+        ...d,
+        rating: Number.isFinite(Number(d?.rating)) ? Number(d.rating) : 0,
+      }))
+    : [];
+
+  const tractors = Array.isArray(src.tractors) ? src.tractors : [];
+  const trailers = Array.isArray(src.trailers) ? src.trailers : [];
+  const locations = Array.isArray(src.locations) ? src.locations : [];
+
+  const distanceKm =
+    typeof src.distanceKm === "object" && src.distanceKm !== null
+      ? src.distanceKm
+      : {};
+
+  const settings =
+    typeof src.settings === "object" && src.settings !== null
+      ? src.settings
+      : {
+          rates: {
+            loadedKmRevenue: 1.4,
+            emptyKmCost: 0.6,
+            tractorKmCostLoaded: 0.3,
+            driverHourCost: 22.5,
+            nightPremiumPct: 25,
           },
-    // ✅ هنا التعديل المهم:
-    // لو الـ state فيها weekStart هنستخدمه (من النavigation)
-    // لو مش موجود هنخلي default = النهارده
-    weekStart: src.weekStart || toISODateLocal(new Date()),
+          trailerDayCost: { reefer: 35, box: 20, taut: 18, chassis: 15 },
+        };
+
+  const weekStart = src.weekStart || toISODateLocal(new Date());
+
+  // 👈 هنا المهم: نحافظ على أي فيلدات إضافية جاية من السيرفر (زي version)
+  return {
+    ...src,
+    jobs,
+    drivers,
+    tractors,
+    trailers,
+    locations,
+    distanceKm,
+    settings,
+    weekStart,
   };
 }
 
