@@ -194,6 +194,7 @@ function buildJobEndDate(dateISO, start, durationHours) {
 function isJobCompletelyInPast(dateISO, start, durationHours) {
   const end = buildJobEndDate(dateISO, start, durationHours);
   if (!end) return false;
+  // رجعناها دايمًا false حسب الكود الحالي عندك
   return false;
 }
 
@@ -251,18 +252,29 @@ export default function DayPlanner() {
     })();
   }, [date]);
 
+  // ✅ التعديل هنا: ناخد النسخة اللي راجعة من السيرفر بعد الحفظ
   async function persistIfAdmin(nextState) {
-    setState(nextState);
-    if (isAdmin) {
-      setSaving(true);
-      try {
-        const safe = normalizeStateForBackend(nextState);
-        await apiSaveState(safe);
-      } catch (e) {
-        console.error("failed saving day planner state", e);
-      } finally {
-        setSaving(false);
+    // optimistic local update
+    const localSafe = normalizeStateFromApi(nextState);
+    setState(localSafe);
+
+    if (!isAdmin) return;
+
+    setSaving(true);
+    try {
+      const backendSafe = normalizeStateForBackend(localSafe);
+      const saved = await apiSaveState(backendSafe);
+      const fixed = normalizeStateFromApi(saved || localSafe);
+      setState(fixed); // هنا بنحدّث الـ version اللي جاية من السيرفر
+    } catch (e) {
+      console.error("failed saving day planner state", e);
+      if (e?.code === "STATE_VERSION_CONFLICT" || e?.status === 409) {
+        alert(
+          "Data was updated by another admin / browser tab.\nYour last change on this day view was NOT saved.\nPlease reload the page before editing again."
+        );
       }
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -376,7 +388,7 @@ export default function DayPlanner() {
   const addNewJobAtSlot = (theDate, slotKey) => {
     if (!state || !isAdmin) return;
     const newJob = {
-      id: `job-${crypto.randomUUID()}`,
+      id: `job-${crypto.randomUUID()} `,
       date: theDate,
       start: startTimeFromSlotKey(slotKey),
       slot: inferWeekSlotFromSlotKey(slotKey),

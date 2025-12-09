@@ -107,6 +107,7 @@ function buildJobEndDate(dateISO, start, durationHours) {
 function isJobCompletelyInPast(dateISO, start, durationHours) {
   const end = buildJobEndDate(dateISO, start, durationHours);
   if (!end) return false;
+  // حسب الكود الحالي عندك مخليها دايمًا false
   return false;
 }
 
@@ -155,7 +156,7 @@ function buildSafeState(raw) {
 
   const weekStart = src.weekStart || toISODateLocal(new Date());
 
-  // 👈 هنا المهم: نحافظ على أي فيلدات إضافية جاية من السيرفر (زي version)
+  // 👈 نحافظ على أي فيلدات إضافية جاية من السيرفر (زي version)
   return {
     ...src,
     jobs,
@@ -244,20 +245,28 @@ export default function Planner() {
     })();
   }, []);
 
+  // ✅ هنا التعديل المهم: نستخدم state الراجعة من السيرفر عشان version ما يفضلش قديم
   async function persistIfAdmin(nextState) {
     const safe = buildSafeState(nextState);
-    setState(safe);
+    setState(safe); // optimistic UI update
 
-    if (isAdmin) {
-      setSaving(true);
-      try {
-        const backendSafe = normalizeStateForBackend(safe);
-        await apiSaveState(backendSafe);
-      } catch (e) {
-        console.error("failed saving planner state", e);
-      } finally {
-        setSaving(false);
+    if (!isAdmin) return;
+
+    setSaving(true);
+    try {
+      const backendSafe = normalizeStateForBackend(safe);
+      const saved = await apiSaveState(backendSafe);
+      const merged = buildSafeState(saved || safe);
+      setState(merged); // نحمل الـ version الجديدة من السيرفر
+    } catch (e) {
+      console.error("failed saving planner state", e);
+      if (e?.code === "STATE_VERSION_CONFLICT" || e?.status === 409) {
+        alert(
+          "Data was updated by another admin / browser tab.\nYour last weekly planner change was NOT saved.\nPlease reload the planner before editing again."
+        );
       }
+    } finally {
+      setSaving(false);
     }
   }
 

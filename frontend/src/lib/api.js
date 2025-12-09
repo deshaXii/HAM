@@ -61,29 +61,41 @@ export async function apiSaveState(nextState) {
     headers: authHeaders(),
     body: JSON.stringify(nextState),
   });
-  const text = await res.text();
-  let data = {};
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    data = {};
-  }
 
   if (!res.ok) {
+    let body = null;
+    try {
+      body = await res.json();
+    } catch {
+      // ممكن السيرفر يرجّع body فاضي أو نص
+    }
+
+    const isConflict = res.status === 409;
+    const baseMsg = body?.error || body?.message || "Failed to save state";
+
     const err = new Error(
-      data.message ||
-        data.error ||
-        `Failed to save state (status ${res.status})`
+      isConflict
+        ? baseMsg ||
+          "State was updated by another user/session. Please reload the planner and try again."
+        : baseMsg
     );
-    // نضيف شوية معلومات مفيدة للـ catch
+
     err.status = res.status;
-    err.code =
-      data.error || (res.status === 409 ? "STATE_VERSION_CONFLICT" : "");
-    err.serverState = data.serverState;
+    if (body?.code) err.code = body.code;
+    if (isConflict && !err.code) {
+      err.code = "STATE_VERSION_CONFLICT";
+    }
+
     throw err;
   }
 
-  return data;
+  // لو OK
+  try {
+    return await res.json();
+  } catch {
+    // لو السيرفر مرجعش JSON (مثلاً 204)
+    return null;
+  }
 }
 
 // -------- Notice board --------

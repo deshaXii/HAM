@@ -37,6 +37,7 @@ const defaultState = {
   ],
   distanceKm: {},
 };
+
 function normalizeTrailers(list) {
   return (Array.isArray(list) ? list : []).map((t) => ({
     ...t,
@@ -44,6 +45,7 @@ function normalizeTrailers(list) {
     types: Array.isArray(t.types) ? t.types : t.type ? [t.type] : [],
   }));
 }
+
 function buildSafeState(raw) {
   const src = raw || {};
   return {
@@ -67,7 +69,7 @@ function buildSafeState(raw) {
   };
 }
 
-// Excel helpers (unchanged except we keep photoUrl)
+// Excel helpers (unchanged)
 function exportStateToExcel(anyState) {
   const driversSheetData = anyState.drivers.map((d) => ({
     id: d.id,
@@ -205,71 +207,150 @@ function importExcelFile(file, setDraft) {
 export default function Admin() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+
   const [serverState, setServerState] = useState(defaultState);
   const [draft, setDraft] = useState(defaultState);
   const [loading, setLoading] = useState(true);
+  const [hasConflict, setHasConflict] = useState(false);
+
+  // tracking للتعديلات المحلية
+  const isDirtyRef = useRef(false);
+  const [isDirty, setIsDirty] = useState(false);
 
   const savingRef = useRef(false);
   const latestDraftRef = useRef(defaultState);
 
-  const loadState = useCallback(async () => {
+  const markDirty = (next) => {
+    isDirtyRef.current = true;
+    setIsDirty(true);
+    latestDraftRef.current = next;
+    return next;
+  };
+
+  const clearDirty = (safe) => {
+    isDirtyRef.current = false;
+    setIsDirty(false);
+    if (safe) {
+      latestDraftRef.current = safe;
+    }
+  };
+
+  const loadState = useCallback(async (options = {}) => {
+    const fromEvent = options.fromEvent || false;
     try {
       const apiState = await apiGetState();
       const safe = buildSafeState(apiState);
       setServerState(safe);
-      setDraft(safe);
-      latestDraftRef.current = safe;
+
+      if (fromEvent && isDirtyRef.current) {
+        // عندي تعديلات محلية → ما تمسحش الـ draft، بس علّم إن في conflict
+        setHasConflict(true);
+      } else {
+        // مفيش تعديلات أو ده load عادي → نحدّث الـ draft بالكامل
+        setDraft(safe);
+        clearDirty(safe);
+        setHasConflict(false);
+      }
     } catch {
       const safe = buildSafeState(null);
       setServerState(safe);
-      setDraft(safe);
-      latestDraftRef.current = safe;
+
+      if (!fromEvent || !isDirtyRef.current) {
+        setDraft(safe);
+        clearDirty(safe);
+      }
     } finally {
       setLoading(false);
     }
   }, []);
 
+  const loadStateFromEvent = useCallback(
+    () => loadState({ fromEvent: true }),
+    [loadState]
+  );
+
   useEffect(() => {
     loadState();
   }, [loadState]);
 
-  useServerEventRefetch(["state:updated"], loadState);
+  // نسمع لأحداث state:updated من السيرفر
+  useServerEventRefetch(["state:updated"], loadStateFromEvent);
 
   async function handleSaveChanges(next, silent = false) {
     if (!isAdmin) return;
     if (savingRef.current) return;
+
+    // لو التاب أصلاً في conflict، ما تحاولش تحفظ
+    if (hasConflict) {
+      if (!silent) {
+        alert(
+          "This tab is out of date because another session saved newer data.\nPlease reload the page before saving."
+        );
+      }
+      return;
+    }
+
     savingRef.current = true;
     try {
       const saved = await apiSaveState(next);
       const safe = buildSafeState(saved || next);
+
       setServerState(safe);
       setDraft(safe);
-      latestDraftRef.current = safe;
+      clearDirty(safe);
+      setHasConflict(false);
+
       if (!silent) alert("Saved to database ✅");
     } catch (e) {
       console.error(e);
-      if (!silent) alert("Failed to save ❌");
+      const msg = e?.message || "";
+      const isConflict =
+        e?.code === "STATE_VERSION_CONFLICT" ||
+        e?.status === 409 ||
+        /another user|state was updated/i.test(msg);
+
+      if (isConflict) {
+        setHasConflict(true);
+        if (!silent) {
+          alert(
+            "Data was updated by another user/session.\nThis page is now out of date. Please reload before editing."
+          );
+        }
+      } else if (!silent) {
+        alert("Failed to save ❌");
+      }
     } finally {
       savingRef.current = false;
     }
   }
 
-  // Auto-Save كل 10 ثواني
+  // Auto-Save كل 10 ثواني (بس لو مفيش conflict وفي تغييرات فعلًا)
   useEffect(() => {
     if (!isAdmin) return;
-    const id = setInterval(() => {
-      handleSaveChanges(latestDraftRef.current, true);
-    }, 10000);
-    return () => clearInterval(id);
-  }, [isAdmin]);
+    if (hasConflict) return;
 
-  // حفظ قبل الخروج
+    const id = setInterval(() => {
+      if (isDirtyRef.current) {
+        handleSaveChanges(latestDraftRef.current, true);
+      }
+    }, 10000);
+
+    return () => clearInterval(id);
+  }, [isAdmin, hasConflict]);
+
+  // حفظ قبل الخروج (بس لو في تغييرات ومفيش conflict)
   useEffect(() => {
     if (!isAdmin) return;
-    const h = () => handleSaveChanges(latestDraftRef.current, true);
+    if (hasConflict) return;
+
+    const h = () => {
+      if (isDirtyRef.current) {
+        handleSaveChanges(latestDraftRef.current, true);
+      }
+    };
     window.addEventListener("beforeunload", h);
     return () => window.removeEventListener("beforeunload", h);
-  }, [isAdmin]);
+  }, [isAdmin, hasConflict]);
 
   const handleExportExcel = () => exportStateToExcel(draft);
 
@@ -281,7 +362,14 @@ export default function Admin() {
           "This will OVERWRITE your current draft (drivers / tractors / trailers / jobs). Continue?"
         )
       ) {
-        importExcelFile(file, setDraft);
+        // نمرر wrapper يعلّم الـ draft as dirty
+        importExcelFile(file, (updater) => {
+          setDraft((prev) => {
+            const next =
+              typeof updater === "function" ? updater(prev) : updater;
+            return markDirty(next);
+          });
+        });
       }
     }
     event.target.value = "";
@@ -292,8 +380,7 @@ export default function Admin() {
     setDraft((prev) => {
       const list = Array.isArray(prev[type]) ? prev[type] : [];
       const next = { ...prev, [type]: [...list, newItem] };
-      latestDraftRef.current = next;
-      return next;
+      return markDirty(next);
     });
   };
 
@@ -301,8 +388,7 @@ export default function Admin() {
     setDraft((prev) => {
       const list = Array.isArray(prev[type]) ? prev[type] : [];
       const next = { ...prev, [type]: list.filter((item) => item.id !== id) };
-      latestDraftRef.current = next;
-      return next;
+      return markDirty(next);
     });
   };
 
@@ -315,8 +401,7 @@ export default function Admin() {
           item.id === id ? { ...item, [field]: value } : item
         ),
       };
-      latestDraftRef.current = next;
-      return next;
+      return markDirty(next);
     });
   };
 
@@ -331,15 +416,27 @@ export default function Admin() {
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-[1800px] mx-auto space-y-8">
+        {/* 🔔 Conflict Banner */}
+        {hasConflict && (
+          <div className="bg-yellow-50 border border-yellow-300 text-yellow-800 text-xs px-3 py-2 rounded-lg">
+            Another admin or browser tab has saved newer data. This page is now
+            out of date. Please reload the page before making further changes.
+          </div>
+        )}
+
         {/* HEADER */}
         <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            {/* 👇 العنوان */}
             <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
             <p className="text-gray-600 text-sm mt-1">
               All data is now coming from the shared database. Draft changes
-              auto-save every 10s.
+              auto-save every 10s (when this tab is in sync).
             </p>
+            {isDirty && !hasConflict && (
+              <p className="text-[11px] text-orange-600 mt-1">
+                You have unsaved local changes, they will auto-save shortly...
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap gap-3">
             <button
@@ -378,7 +475,7 @@ export default function Admin() {
         </div>
 
         {/* LAYOUT */}
-        <div className="grid  gap-6">
+        <div className="grid gap-6">
           {/* LEFT 2/3 */}
           <div className="space-y-6 lg:col-span-2">
             {/* TRACTORS */}
@@ -593,7 +690,6 @@ export default function Admin() {
                   sleepsInCab: false,
                   doubleMannedEligible: true,
                   photoUrl: "",
-                  // 👇 افتراضي كل الأيام
                   weekAvailability: [0, 1, 2, 3, 4, 5, 6],
                   leaves: [],
                 })
@@ -608,7 +704,7 @@ export default function Admin() {
                       <Th center>Night Shift</Th>
                       <Th center>Sleeps in Cab</Th>
                       <Th center>2-man Eligible</Th>
-                      <Th center>Rating</Th> {/* NEW */}
+                      <Th center>Rating</Th>
                       <Th right>Actions</Th>
                     </tr>
                   </thead>
@@ -630,7 +726,9 @@ export default function Admin() {
           </div>
 
           {/* RIGHT PANEL */}
-          <div className="space-y-6"></div>
+          <div className="space-y-6">
+            {/* مستقبلًا ممكن تحط AdminExtras هنا */}
+          </div>
         </div>
       </div>
     </div>
@@ -647,6 +745,7 @@ function DriverRow({ driver, onChange, onDelete }) {
       .slice(0, 2)
       .map((w) => w[0]?.toUpperCase())
       .join("") || "?";
+
   async function downscaleToDataURL(
     file,
     maxSize = 256,
@@ -684,6 +783,7 @@ function DriverRow({ driver, onChange, onDelete }) {
       e.target.value = "";
     }
   }
+
   return (
     <tr className="hover:bg-gray-50 transition-colors">
       <Td>
@@ -761,7 +861,6 @@ function DriverRow({ driver, onChange, onDelete }) {
         />
       </Td>
 
-      {/* NEW: Rating */}
       <Td center>
         <input
           type="number"

@@ -26,14 +26,16 @@ export default function JobModal({
   onSave,
   onDelete,
 }) {
-  const [form, setForm] = useState({
+  const [form, setForm] = useState(() => ({
     ...job,
     driverIds: Array.isArray(job.driverIds) ? job.driverIds : [],
     revenueTrip: job.revenueTrip ?? "",
     costDriver: job.costDriver ?? "",
     costTruck: job.costTruck ?? "",
     costDiesel: job.costDiesel ?? "",
-  });
+    // دعم بيانات قديمة عندها overrideStart بس
+    allowStartOverride: job.allowStartOverride ?? job.overrideStart ?? false,
+  }));
 
   const lastTractorEnd = useMemo(() => {
     return job._lastTractorEnd || null;
@@ -46,6 +48,7 @@ export default function JobModal({
   };
 
   const toggleDriver = (driverId) => {
+    if (!isAdmin) return;
     setForm((prev) => {
       const current = Array.isArray(prev.driverIds) ? prev.driverIds : [];
       const exists = current.includes(driverId);
@@ -78,6 +81,23 @@ export default function JobModal({
       : []
     : [];
   const selectedTrailerLabels = labelsFor(selectedTrailerTypes);
+
+  const handleSave = () => {
+    if (!isAdmin || !onSave) return;
+    const payload = {
+      ...form,
+      // خلي overrideStart دايمًا synced مع allowStartOverride
+      overrideStart: form.allowStartOverride,
+    };
+    onSave(payload);
+  };
+
+  const startDisabled =
+    !isAdmin ||
+    (!form.allowStartOverride &&
+      lastTractorEnd &&
+      form.startPoint &&
+      form.startPoint !== lastTractorEnd);
 
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
@@ -197,7 +217,6 @@ export default function JobModal({
                   ))}
                 </select>
 
-                {/* 👇 badges لعرض أنواع المقطورة المختارة (خارج الـselect) */}
                 {selectedTrailerLabels.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1">
                     {selectedTrailerLabels.map((lab) => (
@@ -227,7 +246,7 @@ export default function JobModal({
                     <button
                       key={d.id}
                       type="button"
-                      onClick={() => isAdmin && toggleDriver(d.id)}
+                      onClick={() => toggleDriver(d.id)}
                       className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] border ${
                         checked
                           ? "bg-purple-50 border-purple-300 text-purple-700"
@@ -262,11 +281,7 @@ export default function JobModal({
                   className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   value={form.startPoint || ""}
                   onChange={(e) => set("startPoint", e.target.value)}
-                  disabled={
-                    !form.allowStartOverride &&
-                    lastTractorEnd &&
-                    form.startPoint !== lastTractorEnd
-                  }
+                  disabled={startDisabled}
                 >
                   <option value="">Select...</option>
                   {locationNames.map((loc) => (
@@ -281,12 +296,17 @@ export default function JobModal({
                     <span className="font-medium">{lastTractorEnd}</span>
                   </div>
                 )}
-                <label className="mt-2 flex items-center gap-2 text-xs text-gray-700">
+                <label
+                  className={`mt-2 flex items-center gap-2 text-xs ${
+                    !isAdmin ? "text-gray-400" : "text-gray-700"
+                  }`}
+                >
                   <input
                     type="checkbox"
                     checked={!!form.allowStartOverride}
+                    disabled={!isAdmin}
                     onChange={(e) =>
-                      set("allowStartOverride", e.target.checked)
+                      isAdmin && set("allowStartOverride", e.target.checked)
                     }
                   />
                   Override start point
@@ -310,6 +330,7 @@ export default function JobModal({
                   className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   value={form.endPoint || ""}
                   onChange={(e) => set("endPoint", e.target.value)}
+                  disabled={!isAdmin}
                 >
                   <option value="">Select...</option>
                   {locationNames.map((loc) => (
@@ -338,6 +359,7 @@ export default function JobModal({
                   className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   value={form.revenueTrip}
                   onChange={(e) => set("revenueTrip", e.target.value)}
+                  disabled={!isAdmin}
                 />
               </label>
               <label className="block">
@@ -350,6 +372,7 @@ export default function JobModal({
                   className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   value={form.costDriver}
                   onChange={(e) => set("costDriver", e.target.value)}
+                  disabled={!isAdmin}
                 />
               </label>
               <label className="block">
@@ -362,6 +385,7 @@ export default function JobModal({
                   className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   value={form.costTruck}
                   onChange={(e) => set("costTruck", e.target.value)}
+                  disabled={!isAdmin}
                 />
               </label>
               <label className="block">
@@ -374,6 +398,7 @@ export default function JobModal({
                   className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   value={form.costDiesel}
                   onChange={(e) => set("costDiesel", e.target.value)}
+                  disabled={!isAdmin}
                 />
               </label>
             </div>
@@ -398,12 +423,16 @@ export default function JobModal({
         </div>
         {/* footer */}
         <div className="flex items-center justify-between px-5 py-3 border-t bg-gray-50/60">
-          <button
-            onClick={() => onDelete && onDelete()}
-            className="text-red-600 hover:text-red-800 text-sm"
-          >
-            Delete
-          </button>
+          {isAdmin ? (
+            <button
+              onClick={() => onDelete && onDelete()}
+              className="text-red-600 hover:text-red-800 text-sm"
+            >
+              Delete
+            </button>
+          ) : (
+            <span className="text-[11px] text-gray-400">Read-only view</span>
+          )}
           <div className="flex gap-2">
             <button
               onClick={onClose}
@@ -411,12 +440,14 @@ export default function JobModal({
             >
               Cancel
             </button>
-            <button
-              onClick={() => onSave && onSave(form)}
-              className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded"
-            >
-              <Save size={16} /> Save
-            </button>
+            {isAdmin && (
+              <button
+                onClick={handleSave}
+                className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded"
+              >
+                <Save size={16} /> Save
+              </button>
+            )}
           </div>
         </div>
       </div>

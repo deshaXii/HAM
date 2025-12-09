@@ -1,3 +1,4 @@
+// front/src/components/JobCard.jsx
 import React, { useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import {
@@ -55,9 +56,9 @@ export function getJobWarnings(job, resources) {
   const tractors = resources?.tractors || [];
   const trailers = resources?.trailers || [];
 
-  const getDriver = (id) => drivers.find((d) => d.id === id);
-  const getTractor = (id) => tractors.find((t) => t.id === id);
-  const getTrailer = (id) => trailers.find((t) => t.id === id);
+  const getDriver = (id) => drivers.find((d) => String(d.id) === String(id));
+  const getTractor = (id) => tractors.find((t) => String(t.id) === String(id));
+  const getTrailer = (id) => trailers.find((t) => String(t.id) === String(id));
 
   const out = [];
 
@@ -81,11 +82,11 @@ export function getJobWarnings(job, resources) {
   if (!job.durationHours || job.durationHours === 0)
     out.push("Missing duration");
 
-  // لو مفيش start/time
   if (!job.start) out.push("Missing start time");
 
   return out;
 }
+
 function isJobCompleted(job) {
   if (!job?.date) return false;
 
@@ -111,17 +112,24 @@ function isJobCompleted(job) {
 }
 
 export function getJobBgClass(job, warnings) {
+  const hasWarnings = Array.isArray(warnings) && warnings.length > 0;
+
+  const overrideActive =
+    !!job?.startPoint &&
+    (job?.allowStartOverride ?? job?.overrideStart ?? false);
+
   if (isJobCompleted(job)) {
-    // أخضر فاتح
     return "bg-green-50 border-green-300";
   }
-  if (warnings && warnings.length > 0) {
-    // أصفر فاتح للناقص
-    return "bg-yellow-50 border-yellow-300";
+  if (hasWarnings) {
+    return "bg-amber-50 border-amber-300";
   }
-  // أبيض للـ OK
+  if (overrideActive) {
+    return "bg-white border-red-300";
+  }
   return "bg-white border-gray-200";
 }
+
 const JobCard = ({
   job,
   resources,
@@ -132,39 +140,56 @@ const JobCard = ({
   isAdmin,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
-  const [editData, setEditData] = useState(job);
+  const [editData, setEditData] = useState(() => ({
+    ...job,
+    // دعم بيانات قديمة عندها overrideStart بس
+    allowStartOverride: job.allowStartOverride ?? job.overrideStart ?? false,
+  }));
   const { isOver, setNodeRef } = useDroppable({ id: job.id });
 
-  const getDriver = (id) => (resources.drivers || []).find((d) => d.id === id);
+  const getDriver = (id) =>
+    (resources.drivers || []).find((d) => String(d.id) === String(id));
   const getTractor = (id) =>
-    (resources.tractors || []).find((t) => t.id === id);
+    (resources.tractors || []).find((t) => String(t.id) === String(id));
   const getTrailer = (id) =>
-    (resources.trailers || []).find((t) => t.id === id);
+    (resources.trailers || []).find((t) => String(t.id) === String(id));
 
   const warnings = getJobWarnings(job, resources);
   const hasWarnings = warnings.length > 0;
 
   const saveInline = () => {
-    onUpdate && onUpdate(job.id, editData);
+    if (!onUpdate) {
+      setIsEditing(false);
+      return;
+    }
+    const payload = {
+      ...editData,
+      // نخلي الاتنين متزامنين علشان أي كود قديم
+      overrideStart: editData.allowStartOverride,
+    };
+    onUpdate(job.id, payload);
     setIsEditing(false);
   };
-  const cancelInline = () => {
-    setEditData(job);
-    setIsEditing(false);
-  };
-  const bgClass = getJobBgClass(job, warnings);
 
-  let cardBorder = "border-gray-200";
-  if (job.overrideStart && job.startPoint) cardBorder = "border-red-300";
-  if (hasWarnings) cardBorder = "border-amber-400";
+  const cancelInline = () => {
+    setEditData({
+      ...job,
+      allowStartOverride: job.allowStartOverride ?? job.overrideStart ?? false,
+    });
+    setIsEditing(false);
+  };
+
+  const bgClass = getJobBgClass(job, warnings);
 
   /* =========== EDIT MODE =========== */
   if (isEditing) {
     return (
       <div
         ref={setNodeRef}
-        className={`bg-white border-2 ${cardBorder} rounded-lg p-3 shadow-lg ${
-          isOver ? "bg-blue-50" : ""
+        className={`bg-white border-2 rounded-lg p-3 shadow-lg ${
+          isOver
+            ? "bg-blue-50 border-blue-300 border-dashed"
+            : "border-gray-200"
         }`}
       >
         <div className="flex items-center justify-between mb-2">
@@ -187,7 +212,7 @@ const JobCard = ({
 
         <div className="space-y-2 text-xs">
           <input
-            value={editData.client}
+            value={editData.client || ""}
             onChange={(e) =>
               setEditData((p) => ({ ...p, client: e.target.value }))
             }
@@ -218,12 +243,15 @@ const JobCard = ({
           <label className="flex items-center gap-2 text-xs text-gray-700">
             <input
               type="checkbox"
-              checked={!!editData.overrideStart}
+              checked={!!editData.allowStartOverride}
               onChange={(e) =>
-                setEditData((p) => ({ ...p, overrideStart: e.target.checked }))
+                setEditData((p) => ({
+                  ...p,
+                  allowStartOverride: e.target.checked,
+                }))
               }
             />
-            Allow manual Start point override
+            Override start point manually
           </label>
 
           <div className="grid grid-cols-2 gap-1">
@@ -237,7 +265,7 @@ const JobCard = ({
             />
             <input
               type="number"
-              value={editData.durationHours}
+              value={editData.durationHours ?? ""}
               onChange={(e) =>
                 setEditData((p) => ({
                   ...p,
@@ -266,10 +294,9 @@ const JobCard = ({
     <div
       onClick={() => onOpen && onOpen()}
       ref={setNodeRef}
-      //  pb-6
-      className={`relative border ${cardBorder}  ${bgClass} rounded-xl p-3 shadow-sm hover:shadow-md transition-all cursor-pointer text-xs sm:text-[13px] min-h-[60px] ${
-        hasWarnings ? "bg-amber-50" : "bg-white"
-      } ${isOver ? "bg-blue-50 border-2 border-blue-300 border-dashed" : ""}`}
+      className={`relative border ${bgClass} rounded-xl p-3 shadow-sm hover:shadow-md transition-all cursor-pointer text-xs sm:text-[13px] min-h-[60px] ${
+        isOver ? "bg-blue-50 border-2 border-blue-300 border-dashed" : ""
+      }`}
     >
       {/* status dot */}
       <span
@@ -332,83 +359,9 @@ const JobCard = ({
         )}
       </div>
 
-      {/* Route line */}
-      {/*  mb-2 */}
-      {/* <div className="flex items-center gap-1 text-[11px] text-gray-700 pl-3">
-        <MapPin size={12} />
-        <span className="truncate">
-          {pickupLabel} → {dropoffLabel}
-        </span>
-      </div> */}
+      {/* هنا لو حبيت ترجع الـ route / badges / pricing تاني، الكود موجود ومتعَلَّق فوق */}
 
-      {/* Badges: Tractor + Trailer + Drivers جنب بعض */}
-      {/* <div className="flex flex-wrap items-center gap-1 pl-3 pr-8 mb-1"> */}
-      {/* Tractor */}
-      {/* <span
-          className={`inline-flex items-center gap-[4px] px-2 py-[3px] rounded-full text-[11px] ${
-            job.tractorId
-              ? "bg-blue-100 text-blue-800"
-              : "bg-gray-100 text-gray-500"
-          }`}
-        >
-          <Truck size={12} className="shrink-0" />
-          <span>
-            {job.tractorId
-              ? getTractor(job.tractorId)?.code || "Tractor"
-              : "No tractor"}
-          </span>
-        </span> */}
-
-      {/* Trailer */}
-      {/* <span
-          className={`inline-flex items-center gap-[4px] px-2 py-[3px] rounded-full text-[11px] ${
-            job.trailerId
-              ? "bg-emerald-100 text-emerald-800"
-              : "bg-gray-100 text-gray-500"
-          }`}
-        >
-          <MapPin size={12} className="shrink-0" />
-          <span>
-            {job.trailerId
-              ? getTrailer(job.trailerId)?.code || "Trailer"
-              : "No trailer"}
-          </span>
-        </span> */}
-
-      {/* Drivers */}
-      {/* {job.driverIds && job.driverIds.length > 0 ? (
-          job.driverIds.map((driverId) => {
-            const driver = getDriver(driverId);
-            if (!driver) return null;
-            return (
-              <span
-                key={driverId}
-                className="inline-flex items-center gap-[4px] px-2 py-[3px] rounded-full bg-purple-100 text-purple-800 text-[11px]"
-              >
-                <Users size={12} className="shrink-0" />
-                <span>{driver.name}</span>
-              </span>
-            );
-          })
-        ) : (
-          <span className="inline-flex items-center gap-[4px] px-2 py-[3px] rounded-full bg-gray-100 text-gray-500 text-[11px]">
-            <Users size={12} className="shrink-0" />
-            <span>No driver</span>
-          </span>
-        )} */}
-      {/* </div> */}
-
-      {/* Pricing absolute في الركن تحت يمين */}
-      {/* <div className="absolute bottom-2 right-3 flex items-center gap-1 text-[11px] text-gray-700">
-        <Euro size={12} />
-        <span>
-          {job.pricing?.type === "fixed"
-            ? `€${job.pricing?.value ?? 0}`
-            : `€${job.pricing?.value ?? 0}/km`}
-        </span>
-      </div> */}
-
-      {/* Warnings لو موجودة (تحت على الشمال) */}
+      {/* Warnings (لسه متعطلة بالـ hidden لو حبيت تفعّلها بعدين) */}
       {warnings.length > 0 && (
         <div className="mt-2 pt-2 border-t border-amber-100 pr-16 hidden">
           {warnings.map((w, i) => (
