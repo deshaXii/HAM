@@ -1,21 +1,9 @@
-// front/src/components/Admin.jsx
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import useServerEventRefetch from "../hooks/useServerEventRefetch";
 import MultiTypeSelect from "./MultiTypeSelect";
 import { TRAILER_TAXONOMY } from "../constants/trailerTaxonomy";
 import { TRACTOR_TAXONOMY } from "../constants/tractorTaxonomy";
-import {
-  Plus,
-  Trash2,
-  Download,
-  Upload,
-  Save,
-  Truck,
-  MapPin,
-  Users,
-  X,
-  ImageIcon,
-} from "lucide-react";
+import { Plus, Trash2, Download, Upload, X, ImageIcon } from "lucide-react";
 import AdminExtras from "./AdminExtras";
 import { useAuth } from "../contexts/AuthContext";
 import { apiGetState, apiSaveState, apiUploadDriverPhoto } from "../lib/api";
@@ -28,15 +16,20 @@ const defaultState = {
   trailers: [],
   jobs: [],
   weekStart: "2025-11-02",
-  locations: [
-    "Depot-Hoofddorp",
-    "AH-Zaandam",
-    "Aldi-Culemborg",
-    "Action-Zwaagdijk",
-    "PostNL-Amsterdam",
-  ],
+  locations: [],
   distanceKm: {},
+  settings: {
+    rates: { driverPerKm: 0.25, doubleMannedMultiplier: 1.15 },
+    trailerDayCost: { refrigerated: 35, box: 25, flatbed: 20 },
+  },
 };
+
+function normalizeTractors(list) {
+  return (Array.isArray(list) ? list : []).map((t) => ({
+    ...t,
+    types: Array.isArray(t.types) ? t.types : t.type ? [t.type] : [],
+  }));
+}
 
 function normalizeTrailers(list) {
   return (Array.isArray(list) ? list : []).map((t) => ({
@@ -52,12 +45,10 @@ function buildSafeState(raw) {
     ...defaultState,
     ...src,
     drivers: Array.isArray(src.drivers) ? src.drivers : [],
-    tractors: Array.isArray(src.tractors) ? src.tractors : [],
+    tractors: normalizeTractors(src.tractors),
     trailers: normalizeTrailers(src.trailers),
     jobs: Array.isArray(src.jobs) ? src.jobs : [],
-    locations: Array.isArray(src.locations)
-      ? src.locations
-      : [...defaultState.locations],
+    locations: Array.isArray(src.locations) ? src.locations : [],
     distanceKm:
       typeof src.distanceKm === "object" && src.distanceKm !== null
         ? src.distanceKm
@@ -66,40 +57,128 @@ function buildSafeState(raw) {
       typeof src.settings === "object" && src.settings !== null
         ? { ...defaultState.settings, ...src.settings }
         : { ...defaultState.settings },
+    weekStart: src.weekStart || defaultState.weekStart,
   };
 }
 
-// Excel helpers (unchanged)
+/* ================= Excel helpers ================= */
+
+function parseBool(val) {
+  return (
+    val === true || val === 1 || val === "1" || val === "true" || val === "TRUE"
+  );
+}
+
+function parseCsvList(val) {
+  if (!val && val !== 0) return [];
+  if (Array.isArray(val)) return val.filter(Boolean).map(String);
+  const s = String(val).trim();
+  if (!s) return [];
+  return s
+    .split(",")
+    .map((x) => String(x).trim())
+    .filter(Boolean);
+}
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function normalizeExcelDate(val) {
+  // returns YYYY-MM-DD or ""
+  if (!val && val !== 0) return "";
+  if (val instanceof Date && !Number.isNaN(val.getTime())) {
+    return val.toISOString().slice(0, 10);
+  }
+  if (typeof val === "number") {
+    // Excel date serial
+    const p = XLSX.SSF?.parse_date_code?.(val);
+    if (p && p.y && p.m && p.d) {
+      return `${p.y}-${pad2(p.m)}-${pad2(p.d)}`;
+    }
+  }
+  const s = String(val).trim();
+  if (!s) return "";
+
+  // if already ISO
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+
+  // try parse
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+
+  return s.slice(0, 10);
+}
+
+function normalizeExcelTime(val, fallback = "08:00") {
+  // returns HH:MM
+  if (!val && val !== 0) return fallback;
+  if (val instanceof Date && !Number.isNaN(val.getTime())) {
+    return `${pad2(val.getHours())}:${pad2(val.getMinutes())}`;
+  }
+  if (typeof val === "number") {
+    // Excel time fraction of day
+    const totalSeconds = Math.round(val * 24 * 3600);
+    const hh = Math.floor(totalSeconds / 3600) % 24;
+    const mm = Math.floor((totalSeconds % 3600) / 60);
+    return `${pad2(hh)}:${pad2(mm)}`;
+  }
+  const s = String(val).trim();
+  if (/^\d{1,2}:\d{2}/.test(s)) {
+    const [h, m] = s.split(":");
+    return `${pad2(Number(h || 0))}:${pad2(Number(m || 0))}`;
+  }
+  return fallback;
+}
+
+function parseJobSlot(val) {
+  // DB normalized uses INT slot; keep compatibility with "day"/"night"
+  if (val === null || val === undefined || val === "") return 0;
+  if (typeof val === "number" && Number.isFinite(val)) return Math.trunc(val);
+  const s = String(val).trim().toLowerCase();
+  if (!s) return 0;
+  if (s === "day") return 0;
+  if (s === "night") return 1;
+  const n = Number(s);
+  return Number.isFinite(n) ? Math.trunc(n) : 0;
+}
+
 function exportStateToExcel(anyState) {
-  const driversSheetData = anyState.drivers.map((d) => ({
+  const driversSheetData = (anyState.drivers || []).map((d) => ({
     id: d.id,
     name: d.name,
+    code: d.code || "",
     canNight: d.canNight ? 1 : 0,
     sleepsInCab: d.sleepsInCab ? 1 : 0,
     doubleMannedEligible: d.doubleMannedEligible ? 1 : 0,
+    rating: Number.isFinite(Number(d.rating)) ? Number(d.rating) : "",
     photoUrl: d.photoUrl || "",
   }));
-  const tractorsSheetData = anyState.tractors.map((t) => ({
+
+  const tractorsSheetData = (anyState.tractors || []).map((t) => ({
     id: t.id,
     code: t.code,
     plate: t.plate || "",
     currentLocation: t.currentLocation || "",
     doubleManned: t.doubleManned ? 1 : 0,
+    types: Array.isArray(t.types) ? t.types.join(",") : "",
   }));
-  const trailersSheetData = anyState.trailers.map((t) => ({
+
+  const trailersSheetData = (anyState.trailers || []).map((t) => ({
     id: t.id,
     code: t.code,
     plate: t.plate || "",
     types: Array.isArray(t.types) ? t.types.join(",") : "",
   }));
-  const jobsSheetData = anyState.jobs.map((j) => ({
+
+  const jobsSheetData = (anyState.jobs || []).map((j) => ({
     id: j.id,
     date: j.date,
     start: j.start,
     slot: j.slot,
     client: j.client,
-    pickup: j.pickup,
-    dropoff: j.dropoff,
+    pickup: j.pickup || j.startPoint || "",
+    dropoff: j.dropoff || j.endPoint || "",
     durationHours: j.durationHours,
     pricingType: j.pricing?.type,
     pricingValue: j.pricing?.value,
@@ -108,6 +187,7 @@ function exportStateToExcel(anyState) {
     driverIds: Array.isArray(j.driverIds) ? j.driverIds.join(",") : "",
     notes: j.notes || "",
   }));
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(
     wb,
@@ -132,52 +212,57 @@ function exportStateToExcel(anyState) {
   XLSX.writeFile(wb, "fleet-export.xlsx");
 }
 
-function parseBool(val) {
-  return val === true || val === 1 || val === "1" || val === "true";
-}
-
 function importExcelFile(file, setDraft) {
   const reader = new FileReader();
   reader.onload = (e) => {
     const data = new Uint8Array(e.target.result);
     const wb = XLSX.read(data, { type: "array" });
+
     const sheetToJSON = (name) => {
       const ws = wb.Sheets[name];
       if (!ws) return [];
       return XLSX.utils.sheet_to_json(ws, { defval: "" });
     };
+
     const importedDrivers = sheetToJSON("Drivers").map((row) => ({
       id: row.id || crypto.randomUUID(),
       name: row.name || "",
+      code: row.code || "",
       canNight: parseBool(row.canNight),
       sleepsInCab: parseBool(row.sleepsInCab),
       doubleMannedEligible: parseBool(row.doubleMannedEligible),
+      rating: Number.isFinite(Number(row.rating)) ? Number(row.rating) : 0,
       photoUrl: row.photoUrl || "",
-      // 🔸 لو مش موجودة في الإكسل، خليه كل الأيام
+      // لو مش موجودة في الإكسل، خليه كل الأيام
       weekAvailability: [0, 1, 2, 3, 4, 5, 6],
       leaves: [],
     }));
+
     const importedTractors = sheetToJSON("Tractors").map((row) => ({
       id: row.id || crypto.randomUUID(),
       code: row.code || "",
       plate: row.plate || "",
       currentLocation: row.currentLocation || "",
       doubleManned: parseBool(row.doubleManned),
+      types: parseCsvList(row.types || row.type),
     }));
+
     const importedTrailers = sheetToJSON("Trailers").map((row) => ({
       id: row.id || crypto.randomUUID(),
       code: row.code || "",
       plate: row.plate || "",
-      type: row.type || "",
+      // IMPORTANT: types (array) for normalized backend
+      types: parseCsvList(row.types || row.type),
     }));
+
     const importedJobs = sheetToJSON("Jobs").map((row) => ({
       id: row.id || `job-${crypto.randomUUID()}`,
-      date: row.date || "",
-      start: row.start || "08:00",
-      slot: row.slot || "day",
+      date: normalizeExcelDate(row.date) || "",
+      start: normalizeExcelTime(row.start, "08:00"),
+      slot: parseJobSlot(row.slot),
       client: row.client || "Client",
-      pickup: row.pickup || "",
-      dropoff: row.dropoff || "",
+      pickup: row.pickup || row.startPoint || row.start_point || "",
+      dropoff: row.dropoff || row.endPoint || row.end_point || "",
       durationHours: Number(row.durationHours) || 8,
       pricing: {
         type: row.pricingType || "per_km",
@@ -185,12 +270,10 @@ function importExcelFile(file, setDraft) {
       },
       tractorId: row.tractorId || "",
       trailerId: row.trailerId || "",
-      driverIds:
-        typeof row.driverIds === "string" && row.driverIds.trim() !== ""
-          ? row.driverIds.split(",").map((s) => s.trim())
-          : [],
+      driverIds: parseCsvList(row.driverIds),
       notes: row.notes || "",
     }));
+
     setDraft((prev) =>
       buildSafeState({
         ...prev,
@@ -201,8 +284,11 @@ function importExcelFile(file, setDraft) {
       })
     );
   };
+
   reader.readAsArrayBuffer(file);
 }
+
+/* ================= main component ================= */
 
 export default function Admin() {
   const { user } = useAuth();
@@ -230,9 +316,7 @@ export default function Admin() {
   const clearDirty = (safe) => {
     isDirtyRef.current = false;
     setIsDirty(false);
-    if (safe) {
-      latestDraftRef.current = safe;
-    }
+    if (safe) latestDraftRef.current = safe;
   };
 
   const loadState = useCallback(async (options = {}) => {
@@ -243,10 +327,8 @@ export default function Admin() {
       setServerState(safe);
 
       if (fromEvent && isDirtyRef.current) {
-        // عندي تعديلات محلية → ما تمسحش الـ draft، بس علّم إن في conflict
         setHasConflict(true);
       } else {
-        // مفيش تعديلات أو ده load عادي → نحدّث الـ draft بالكامل
         setDraft(safe);
         clearDirty(safe);
         setHasConflict(false);
@@ -280,7 +362,6 @@ export default function Admin() {
     if (!isAdmin) return;
     if (savingRef.current) return;
 
-    // لو التاب أصلاً في conflict، ما تحاولش تحفظ
     if (hasConflict) {
       if (!silent) {
         alert(
@@ -330,9 +411,7 @@ export default function Admin() {
     if (hasConflict) return;
 
     const id = setInterval(() => {
-      if (isDirtyRef.current) {
-        handleSaveChanges(latestDraftRef.current, true);
-      }
+      if (isDirtyRef.current) handleSaveChanges(latestDraftRef.current, true);
     }, 10000);
 
     return () => clearInterval(id);
@@ -344,9 +423,7 @@ export default function Admin() {
     if (hasConflict) return;
 
     const h = () => {
-      if (isDirtyRef.current) {
-        handleSaveChanges(latestDraftRef.current, true);
-      }
+      if (isDirtyRef.current) handleSaveChanges(latestDraftRef.current, true);
     };
     window.addEventListener("beforeunload", h);
     return () => window.removeEventListener("beforeunload", h);
@@ -362,7 +439,6 @@ export default function Admin() {
           "This will OVERWRITE your current draft (drivers / tractors / trailers / jobs). Continue?"
         )
       ) {
-        // نمرر wrapper يعلّم الـ draft as dirty
         importExcelFile(file, (updater) => {
           setDraft((prev) => {
             const next =
@@ -416,7 +492,6 @@ export default function Admin() {
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-[1800px] mx-auto space-y-8">
-        {/* 🔔 Conflict Banner */}
         {hasConflict && (
           <div className="bg-yellow-50 border border-yellow-300 text-yellow-800 text-xs px-3 py-2 rounded-lg">
             Another admin or browser tab has saved newer data. This page is now
@@ -424,7 +499,6 @@ export default function Admin() {
           </div>
         )}
 
-        {/* HEADER */}
         <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
@@ -458,7 +532,6 @@ export default function Admin() {
           </div>
         </div>
 
-        {/* COUNTERS */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <StatCard
             label="Tractors"
@@ -474,11 +547,8 @@ export default function Admin() {
           />
         </div>
 
-        {/* LAYOUT */}
         <div className="grid gap-6">
-          {/* LEFT 2/3 */}
           <div className="space-y-6 lg:col-span-2">
-            {/* TRACTORS */}
             <SectionCard
               title="Tractors Management"
               addLabel="Add Tractor"
@@ -488,6 +558,7 @@ export default function Admin() {
                   plate: "",
                   currentLocation: "",
                   doubleManned: false,
+                  types: [],
                 })
               }
             >
@@ -587,7 +658,6 @@ export default function Admin() {
               </div>
             </SectionCard>
 
-            {/* TRAILERS */}
             <SectionCard
               title="Trailers Management"
               addLabel="Add Trailer"
@@ -595,7 +665,7 @@ export default function Admin() {
                 addDraftItem("trailers", {
                   code: "TLR-NEW",
                   plate: "",
-                  type: "box",
+                  types: ["box"],
                 })
               }
             >
@@ -679,16 +749,17 @@ export default function Admin() {
               </div>
             </SectionCard>
 
-            {/* DRIVERS */}
             <SectionCard
               title="Drivers Management"
               addLabel="Add Driver"
               onAdd={() =>
                 addDraftItem("drivers", {
                   name: "New Driver",
+                  code: "",
                   canNight: true,
                   sleepsInCab: false,
                   doubleMannedEligible: true,
+                  rating: 0,
                   photoUrl: "",
                   weekAvailability: [0, 1, 2, 3, 4, 5, 6],
                   leaves: [],
@@ -725,10 +796,7 @@ export default function Admin() {
             </SectionCard>
           </div>
 
-          {/* RIGHT PANEL */}
-          <div className="space-y-6">
-            {/* مستقبلًا ممكن تحط AdminExtras هنا */}
-          </div>
+          <div className="space-y-6">{/* Right panel */}</div>
         </div>
       </div>
     </div>
@@ -894,7 +962,7 @@ function StatCard({ label, value, icon, color }) {
         <p className="text-xs font-medium text-gray-600">{label}</p>
         <p className="text-xl font-bold text-gray-900">{value}</p>
       </div>
-      <div className={`p-2 ${color} rounded-lg`}>{icon}</div>
+      <div className={`p-2 ${color || ""} rounded-lg`}>{icon}</div>
     </div>
   );
 }

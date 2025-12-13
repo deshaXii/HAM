@@ -22,7 +22,6 @@ import useServerEventRefetch from "../hooks/useServerEventRefetch";
 
 /* ---------- Helpers ---------- */
 function monthKey(isoDate) {
-  // "2025-07"
   return String(isoDate || "").slice(0, 7);
 }
 function distinct(arr) {
@@ -37,8 +36,19 @@ function niceMonthLabel(ym) {
 function safeArr(a) {
   return Array.isArray(a) ? a : [];
 }
+function slotLabel(job) {
+  const s = job?.slot;
+  if (typeof s === "string" && s.trim()) return s.toUpperCase();
+  if (typeof s === "number" && Number.isFinite(s)) {
+    // Keep it simple: 0=DAY, 1=NIGHT, else show SLOT n
+    if (s === 0) return "DAY";
+    if (s === 1) return "NIGHT";
+    return `SLOT ${s}`;
+  }
+  return "DAY";
+}
 function fmtTimeRange(job) {
-  const s = job.start || (job.slot === "night" ? "20:00" : "08:00");
+  const s = job.start || (slotLabel(job) === "NIGHT" ? "20:00" : "08:00");
   const dur = Number(job.durationHours || 0);
   if (!dur) return s;
   const [hh, mm] = s.split(":").map((n) => parseInt(n || "0", 10));
@@ -97,9 +107,9 @@ function Modal({ open, onClose, title, children, widthClass = "max-w-3xl" }) {
 }
 
 function JobList({ jobs, tractors, drivers, trailers }) {
-  if (!jobs?.length) {
+  if (!jobs?.length)
     return <div className="text-sm text-gray-500">No events.</div>;
-  }
+
   return (
     <div className="space-y-2">
       {jobs.map((j) => {
@@ -113,6 +123,10 @@ function JobList({ jobs, tractors, drivers, trailers }) {
         const trailer = trailers.find(
           (t) => String(t.id) === String(j.trailerId)
         );
+
+        const from = j.pickup || j.startPoint || "—";
+        const to = j.dropoff || j.endPoint || "—";
+
         return (
           <div
             key={j.id}
@@ -124,11 +138,13 @@ function JobList({ jobs, tractors, drivers, trailers }) {
               </div>
               <div className="text-xs text-gray-500">{fmtTimeRange(j)}</div>
             </div>
+
             <div className="mt-1 text-xs text-gray-600 flex flex-wrap gap-2">
               <span className="inline-flex items-center gap-1">
                 <Clock4 size={14} />
-                {j.slot?.toUpperCase?.() || "DAY"}
+                {slotLabel(j)}
               </span>
+
               {tractor && (
                 <span className="inline-flex items-center gap-1">
                   🚚 {tractor.code || tractor.plate || tractor.id}
@@ -138,10 +154,11 @@ function JobList({ jobs, tractors, drivers, trailers }) {
               {driverLabels.length > 0 && (
                 <span>👤 {driverLabels.join(", ")}</span>
               )}
-              {(j.startPoint || j.endPoint) && (
+
+              {(j.pickup || j.dropoff || j.startPoint || j.endPoint) && (
                 <span className="inline-flex items-center gap-1">
                   <MapPin size={14} />
-                  {(j.startPoint || "—") + " → " + (j.endPoint || "—")}
+                  {from} → {to}
                 </span>
               )}
             </div>
@@ -162,14 +179,12 @@ export default function Reports() {
   });
   const [loading, setLoading] = useState(true);
 
-  // Filters
   const [clientQuery, setClientQuery] = useState("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
 
   const printRef = useRef(null);
 
-  // Hover popover for day chips
   const [hoverCard, setHoverCard] = useState({
     show: false,
     x: 0,
@@ -178,7 +193,6 @@ export default function Reports() {
     jobs: [],
   });
 
-  // Event modal
   const [modalOpen, setModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
   const [modalJobs, setModalJobs] = useState([]);
@@ -201,7 +215,6 @@ export default function Reports() {
     refetch();
   }, [refetch]);
 
-  // Auto-refresh via SSE on state changes
   useServerEventRefetch(["state:updated"], refetch);
 
   const allClients = useMemo(() => {
@@ -225,12 +238,10 @@ export default function Reports() {
     return jobs;
   }, [state.jobs, clientQuery, fromDate, toDate]);
 
-  /* ================= Client Report ================= */
   const clientGroups = useMemo(() => {
-    // group by client -> month -> { count, dates[] }
     const map = new Map();
     for (const j of filteredJobs) {
-      const c = j.client || "(No client)"; // group key
+      const c = j.client || "(No client)";
       const mk = monthKey(j.date);
       if (!map.has(c)) map.set(c, new Map());
       const byMonth = map.get(c);
@@ -239,7 +250,6 @@ export default function Reports() {
       bucket.count += 1;
       if (j.date) bucket.dates.push(j.date);
     }
-    // to arrays and sort by month ascending
     const out = [];
     for (const [client, months] of map.entries()) {
       const arr = [...months.entries()]
@@ -251,7 +261,6 @@ export default function Reports() {
         }));
       out.push({ client, months: arr });
     }
-    // if the user typed a specific client, focus that first
     out.sort((a, b) => {
       const q = clientQuery.trim().toLowerCase();
       const aHit = a.client.toLowerCase().includes(q);
@@ -262,10 +271,9 @@ export default function Reports() {
     return out;
   }, [filteredJobs, clientQuery]);
 
-  /* ================= Utilization ================= */
   const util = useMemo(() => {
-    const tractorCount = new Map(); // tractorId -> count
-    const driverCount = new Map(); // driverId -> count
+    const tractorCount = new Map();
+    const driverCount = new Map();
 
     for (const j of filteredJobs) {
       if (j.tractorId)
@@ -299,10 +307,7 @@ export default function Reports() {
     return { tractors, drivers };
   }, [filteredJobs, state.tractors, state.drivers]);
 
-  /* ============== Export ============== */
   function exportExcel() {
-    // Sheets:
-    // 1) Client Summary (client, month, count)
     const clientRows = [];
     for (const g of clientGroups) {
       for (const m of g.months) {
@@ -316,14 +321,12 @@ export default function Reports() {
       }
     }
 
-    // 2) Top Tractors
     const tractorRows = util.tractors.map((t) => ({
       tractor: t.code,
       tractorId: t.id,
       jobs: t.count,
     }));
 
-    // 3) Top Drivers
     const driverRows = util.drivers.map((d) => ({
       driver: d.name,
       driverId: d.id,
@@ -379,39 +382,18 @@ export default function Reports() {
     window.print();
   }
 
-  /* ---------- Hover helpers ---------- */
-  function openHoverForDate(e, client, dateISO) {
-    const jobs = filteredJobs
-      .filter((j) => (j.client || "(No client)") === client)
-      .filter((j) => j.date === dateISO)
-      .sort((a, b) => (a.start || "").localeCompare(b.start || ""));
-
-    const rect = e.currentTarget.getBoundingClientRect();
-    setHoverCard({
-      show: true,
-      x: rect.left + rect.width / 2,
-      y: rect.top + window.scrollY - 8,
-      title: `${client} — ${dateISO}`,
-      jobs,
-    });
-  }
-  function closeHover() {
-    setHoverCard((s) => ({ ...s, show: false }));
-  }
   function openModal(title, jobs) {
     setModalTitle(title);
     setModalJobs(jobs);
     setModalOpen(true);
   }
 
-  /* ============== Render ============== */
   return (
     <div
       className="min-h-screen bg-gray-50 p-6 print:p-0 relative"
       ref={printRef}
     >
       <div className="max-w-[1600px] mx-auto space-y-6">
-        {/* Header */}
         <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4 print:hidden">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Reporting</h1>
@@ -442,7 +424,6 @@ export default function Reports() {
           </div>
         </div>
 
-        {/* Filters */}
         <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm print:hidden">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <div className="col-span-2">
@@ -461,7 +442,6 @@ export default function Reports() {
                   className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400"
                 />
               </div>
-              {/* Suggestions */}
               <div className="mt-2 flex flex-wrap gap-2">
                 {allClients.slice(0, 12).map((c) => (
                   <button
@@ -501,7 +481,6 @@ export default function Reports() {
           </div>
         </div>
 
-        {/* Summary cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 print:hidden">
           <SummaryCard
             icon={<BarChart2 className="h-5 w-5 text-indigo-600" />}
@@ -522,23 +501,13 @@ export default function Reports() {
           />
         </div>
 
-        {/* ======= PRINT HEADER ======= */}
-        <div className="hidden print:block p-4">
-          <h1 className="text-xl font-bold">Reporting</h1>
-          <div className="text-xs text-gray-600">
-            Generated at: {new Date().toLocaleString()} | Client filter:{" "}
-            {clientQuery || "—"} | Range: {fromDate || "—"} → {toDate || "—"}
-          </div>
-        </div>
-
-        {/* Client Report Table */}
         <section className="bg-white border border-gray-200 rounded-xl shadow-sm p-4 break-inside-avoid relative">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold text-gray-800">
               Client Report
             </h2>
             <div className="text-[11px] text-gray-500">
-              Hover any date to preview events, click “View all” to open them.
+              Click any date to open events.
             </div>
           </div>
 
@@ -572,7 +541,7 @@ export default function Reports() {
                     <tbody>
                       {g.months.map((m) => (
                         <tr
-                          key={`${g.client}-${m.month}-${Math.random()}`}
+                          key={`${g.client}-${m.month}`}
                           className="border-b last:border-b-0"
                         >
                           <td className="px-3 py-2">
@@ -585,9 +554,7 @@ export default function Reports() {
                             <div className="flex flex-wrap gap-1">
                               {m.dates.map((d) => (
                                 <span
-                                  key={`${g.client}-${
-                                    m.month
-                                  }-${d}-${Math.random()}`}
+                                  key={`${g.client}-${m.month}-${d}`}
                                   className="px-2 py-0.5 rounded-full bg-gray-100 border text-[10px] cursor-pointer hover:bg-gray-200"
                                   onClick={() =>
                                     openModal(
@@ -622,7 +589,6 @@ export default function Reports() {
           )}
         </section>
 
-        {/* Utilization */}
         <section className="bg-white border border-gray-200 rounded-xl shadow-sm p-4 break-inside-avoid">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold text-gray-800">Utilization</h2>
@@ -632,7 +598,6 @@ export default function Reports() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Tractors */}
             <div>
               <div className="text-sm font-semibold text-gray-700 mb-2">
                 Top Tractors
@@ -692,7 +657,6 @@ export default function Reports() {
               </div>
             </div>
 
-            {/* Drivers */}
             <div>
               <div className="text-sm font-semibold text-gray-700 mb-2">
                 Top Drivers
@@ -758,49 +722,11 @@ export default function Reports() {
           </div>
         </section>
 
-        {/* Print footer */}
         <div className="hidden print:block p-4 text-[10px] text-gray-500">
           © Fleet Planner — Generated {new Date().toLocaleString()}
         </div>
       </div>
 
-      {/* Hover card */}
-      {hoverCard.show && (
-        <div
-          className="absolute z-[60]"
-          style={{
-            left: hoverCard.x,
-            top: hoverCard.y,
-            transform: "translate(-50%, -100%)",
-          }}
-          onMouseEnter={() => setHoverCard((s) => ({ ...s, show: true }))}
-          onMouseLeave={closeHover}
-        >
-          <div className="bg-white border shadow-lg rounded-lg p-3 w-[340px]">
-            <div className="text-xs font-semibold text-gray-800 mb-2">
-              {hoverCard.title}
-            </div>
-            <JobList
-              jobs={hoverCard.jobs}
-              tractors={state.tractors}
-              drivers={state.drivers}
-              trailers={state.trailers}
-            />
-            {hoverCard.jobs?.length > 0 && (
-              <div className="mt-2 text-right">
-                <button
-                  className="text-xs text-blue-700 hover:underline"
-                  onClick={() => openModal(hoverCard.title, hoverCard.jobs)}
-                >
-                  View all
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Modal with events */}
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
@@ -814,7 +740,6 @@ export default function Reports() {
         />
       </Modal>
 
-      {/* Print styles */}
       <style>{`
         @media print {
           @page { size: A4; margin: 12mm; }
