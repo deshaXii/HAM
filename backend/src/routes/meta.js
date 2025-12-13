@@ -1,11 +1,12 @@
+// backend/src/routes/meta.js
 const express = require("express");
-const { getState, saveState } = require("../controllers/stateController");
 const { auth } = require("../middleware/auth");
 const { admin } = require("../middleware/admin");
+const { getMeta, patchMeta } = require("../controllers/metaController");
 
 const router = express.Router();
 
-router.get("/", auth, getState);
-router.put("/", auth, admin, saveState);
+router.get("/", auth, getMeta);
+router.patch("/", auth, admin, patchMeta);
 
 module.exports = router;

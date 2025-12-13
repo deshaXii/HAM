@@ -572,7 +572,7 @@ export default function Reports() {
                     <tbody>
                       {g.months.map((m) => (
                         <tr
-                          key={`${g.client}-${m.month}`}
+                          key={`${g.client}-${m.month}-${Math.random()}`}
                           className="border-b last:border-b-0"
                         >
                           <td className="px-3 py-2">
@@ -585,7 +585,9 @@ export default function Reports() {
                             <div className="flex flex-wrap gap-1">
                               {m.dates.map((d) => (
                                 <span
-                                  key={`${g.client}-${m.month}-${d}`}
+                                  key={`${g.client}-${
+                                    m.month
+                                  }-${d}-${Math.random()}`}
                                   className="px-2 py-0.5 rounded-full bg-gray-100 border text-[10px] cursor-pointer hover:bg-gray-200"
                                   onClick={() =>
                                     openModal(

@@ -1,41 +1,63 @@
+// backend/src/app.js
 const express = require("express");
 const cors = require("cors");
-const morgan = require("morgan");
 const path = require("path");
 
+const { auth } = require("./middleware/auth");
+const { me } = require("./controllers/authController");
+
 const authRoutes = require("./routes/auth");
-const stateRoutes = require("./routes/state");
 const noticeRoutes = require("./routes/notice");
 const usersRoutes = require("./routes/users");
 const tasksRoutes = require("./routes/tasks");
 const uploadRoutes = require("./routes/upload");
 const healthRoutes = require("./routes/health");
 
-// ✨ استيراد دول
-const { auth } = require("./middleware/auth");
-const { me } = require("./controllers/authController");
+// New normalized planner resources
+const driversRoutes = require("./routes/drivers");
+const tractorsRoutes = require("./routes/tractors");
+const trailersRoutes = require("./routes/trailers");
+const jobsRoutes = require("./routes/jobs");
+const locationsRoutes = require("./routes/locations");
+const distancesRoutes = require("./routes/distances");
+const settingsRoutes = require("./routes/settings");
+const metaRoutes = require("./routes/meta");
+const agendaRoutes = require("./routes/agenda");
 
 const app = express();
-app.set("trust proxy", 1);
+
 app.use(
   cors({
     origin: "*",
+    allowedHeaders: ["Content-Type", "Authorization", "X-Planner-Version"],
+    exposedHeaders: ["X-Planner-Version"],
   })
 );
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true }));
-app.use(morgan("dev"));
 
-// ملفات الرفع
+app.use(express.json({ limit: "10mb" }));
 app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
+
 app.use(require("./routes/realtime"));
+
 app.use("/auth", authRoutes);
-app.use("/state", stateRoutes);
+
+// Normalized planner resources
+app.use("/drivers", driversRoutes);
+app.use("/tractors", tractorsRoutes);
+app.use("/trailers", trailersRoutes);
+app.use("/jobs", jobsRoutes);
+app.use("/locations", locationsRoutes);
+app.use("/distances", distancesRoutes);
+app.use("/settings", settingsRoutes);
+app.use("/meta", metaRoutes);
+app.use("/agenda", agendaRoutes);
+
 app.use("/notice", noticeRoutes);
 app.use("/users", usersRoutes);
 app.use("/tasks", tasksRoutes);
 app.use("/upload", uploadRoutes);
 app.use("/health", healthRoutes);
+
 app.get("/me", auth, me);
 
 // غلطات
