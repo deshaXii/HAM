@@ -68,25 +68,6 @@ function DriverRow({ driver, onChange, onDelete }) {
       .map((w) => w[0]?.toUpperCase())
       .join("") || "?";
 
-  async function downscaleToDataURL(
-    file,
-    maxSize = 256,
-    mime = "image/jpeg",
-    quality = 0.85
-  ) {
-    const bitmap = await createImageBitmap(file);
-    const { width, height } = bitmap;
-    const scale = Math.min(1, maxSize / Math.max(width, height));
-    const w = Math.max(1, Math.round(width * scale));
-    const h = Math.max(1, Math.round(height * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(bitmap, 0, 0, w, h);
-    return canvas.toDataURL(mime, quality);
-  }
-
   async function handleSelectFile(e) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -94,11 +75,13 @@ function DriverRow({ driver, onChange, onDelete }) {
     try {
       // Upload original to server (keeps filesystem behavior)
       const res = await apiUploadDriverPhoto(driver.id, file);
-      if (res?.photoUrl) onChange("photoUrl", res.photoUrl);
-
-      // Also keep a small preview in UI to avoid big blobs in state
-      const preview = await downscaleToDataURL(file);
-      onChange("photoPreview", preview);
+      // Backend returns { url } in production; support both keys.
+      const url = res?.photoUrl || res?.url;
+      if (url) {
+        onChange("photoUrl", url);
+        // Ensure we never persist base64 blobs to DB/state.
+        onChange("photoPreview", "");
+      }
     } catch (err) {
       console.error(err);
       alert("Failed to upload photo. Please try again.");
@@ -107,7 +90,7 @@ function DriverRow({ driver, onChange, onDelete }) {
     }
   }
 
-  const photoSrc = driver.photoUrl || driver.photoPreview || "";
+  const photoSrc = driver.photoUrl || "";
 
   return (
     <tr className="hover:bg-gray-50">
@@ -283,8 +266,14 @@ export default function AdminDriversPage() {
     savingRef.current = true;
     setIsSaving(true);
     setSaveError("");
+    // Never persist large in-memory previews (base64) to the DB/state.
+    const sanitizedDrivers = (Array.isArray(driversList) ? driversList : []).map((d) => {
+      const { photoPreview, ...rest } = d || {};
+      return rest;
+    });
+
     try {
-      const nextState = { ...snapshot, drivers: driversList };
+      const nextState = { ...snapshot, drivers: sanitizedDrivers };
       const saved = await apiSaveState(nextState);
       setFullState(saved);
       fullStateRef.current = saved;
@@ -306,7 +295,7 @@ export default function AdminDriversPage() {
             setFullState(safeFresh);
             fullStateRef.current = safeFresh;
             // Try again with the latest version baseline
-            const saved2 = await apiSaveState({ ...safeFresh, drivers: driversList });
+            const saved2 = await apiSaveState({ ...safeFresh, drivers: sanitizedDrivers });
             setFullState(saved2);
             fullStateRef.current = saved2;
             clearDirty();

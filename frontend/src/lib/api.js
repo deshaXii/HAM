@@ -667,7 +667,11 @@ export async function apiUploadDriverPhoto(driverId, file) {
       j.error ||
         "Failed to upload driver photo (تأكد إنك عامل الراوت في السيرفر)."
     );
-  return j; // { url }
+  // Normalize response keys across environments.
+  if (j && !j.photoUrl && j.url) {
+    return { ...j, photoUrl: j.url };
+  }
+  return j; // { photoUrl }
 }
 
 
