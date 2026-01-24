@@ -1,6 +1,7 @@
 // src/components/Drivers.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
+import { resolveDriverPhotoUrl } from "../lib/photoUrl";
 import { Plus, Trash2, ImageIcon, Save, RefreshCw, Search } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import {
@@ -90,7 +91,7 @@ function DriverRow({ driver, onChange, onDelete }) {
     }
   }
 
-  const photoSrc = driver.photoUrl || "";
+  const photoSrc = driver.photoUrl ? resolveDriverPhotoUrl(driver.photoUrl) : "" || "";
 
   return (
     <tr className="hover:bg-gray-50">
