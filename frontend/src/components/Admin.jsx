@@ -501,11 +501,11 @@ const deleteItem = async (type, id) => {
               onClick={handleExportExcel}
               className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
             >
-              <Download size={16} /> Export Excel
+              <Download size={16} /> Export Excel (No Drivers)
             </button>
 
             <label className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors cursor-pointer text-sm font-medium">
-              <Upload size={16} /> Import Excel
+              <Upload size={16} /> Import Excel (No Drivers)
               <input
                 type="file"
                 accept=".xlsx,.xls"

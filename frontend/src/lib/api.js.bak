@@ -148,8 +148,10 @@ function safeList(nextList, fallbackList) {
 }
 
 
-
-
+// Safety helper: when a screen produces partial state (undefined/null lists), treat it as "no change"
+function safeList(nextList, fallbackList) {
+  return Array.isArray(nextList) ? nextList : Array.isArray(fallbackList) ? fallbackList : [];
+}
 
 
 export async function apiGetState() {
