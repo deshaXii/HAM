@@ -30,12 +30,27 @@ function parseJsonArray(s, fallback = []) {
   }
 }
 
+
+function normalizePhotoUrl(photoUrl) {
+  const s = String(photoUrl || "");
+  if (!s) return "";
+  // If absolute but missing /api before /uploads, fix it
+  if (/^https?:\/\//i.test(s)) {
+    return s.replace(/\/uploads\//, "/api/uploads/");
+  }
+  // If relative /uploads/..., serve it via /api/uploads/...
+  if (s.startsWith("/uploads/")) return "/api" + s;
+  if (s.startsWith("/api/uploads/")) return s;
+  if (s.startsWith("uploads/")) return "/api/" + s;
+  return s;
+}
+
 function mapDriverRow(r) {
   return {
     id: r.id,
     name: r.name,
     code: r.code || "",
-    photoUrl: r.photo_url || "",
+    photoUrl: normalizePhotoUrl(r.photo_url || ""),
     canNight: !!r.can_night,
     sleepsInCab: !!r.sleeps_in_cab,
     doubleMannedEligible: !!r.double_manned_eligible,

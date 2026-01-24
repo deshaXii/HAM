@@ -35,6 +35,7 @@ app.use(
 );
 
 app.use(express.json({ limit: "10mb" }));
+app.use("/api/uploads", express.static(path.join(__dirname, "..", "uploads")));
 app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 
 app.use(require("./routes/realtime"));

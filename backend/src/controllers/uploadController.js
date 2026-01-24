@@ -23,13 +23,26 @@ function buildPublicApiBase(req) {
   return `${proto}://${host}${needsApiPrefix ? "/api" : ""}`.replace(/\/+$/, "");
 }
 
+
+function normalizePhotoUrl(photoUrl) {
+  const s = String(photoUrl || "");
+  if (!s) return "";
+  if (/^https?:\/\//i.test(s)) {
+    return s.replace(/\/uploads\//, "/api/uploads/");
+  }
+  if (s.startsWith("/uploads/")) return "/api" + s;
+  if (s.startsWith("/api/uploads/")) return s;
+  if (s.startsWith("uploads/")) return "/api/" + s;
+  return s;
+}
+
 function mapDriverRow(r) {
   // Keep it minimal – only what the UI needs
   return {
     id: r.id,
     name: r.name,
     code: r.code || "",
-    photoUrl: r.photo_url || "",
+    photoUrl: normalizePhotoUrl(r.photo_url || ""),
     canNight: !!r.can_night,
     sleepsInCab: !!r.sleeps_in_cab,
     doubleMannedEligible: !!r.double_manned_eligible,
@@ -95,7 +108,7 @@ async function uploadDriverPhoto(req, res) {
     // Persist URL in DB (this is the missing piece)
     await conn.query(
       `UPDATE drivers SET photo_url = ? WHERE id = ? AND deleted_at IS NULL`,
-      [url, driverId]
+      [relativePath, driverId]
     );
 
     const [afterRows] = await conn.query(
