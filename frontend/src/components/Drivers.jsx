@@ -90,7 +90,7 @@ function DriverRow({ driver, onChange, onDelete }) {
       e.target.value = "";
     }
   }
-
+console.log(resolveDriverPhotoUrl(driver.photoUrl),  '+++++++++++++')
   const photoSrc = driver.photoUrl ? resolveDriverPhotoUrl(driver.photoUrl) : "" || "";
 
   return (
