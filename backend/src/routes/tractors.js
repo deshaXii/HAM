@@ -2,6 +2,7 @@
 const express = require("express");
 const { auth } = require("../middleware/auth");
 const { admin } = require("../middleware/admin");
+const { requireDeleteIntent } = require("../middleware/requireDeleteIntent");
 const {
   getTractors,
   createTractor,
@@ -14,6 +15,6 @@ const router = express.Router();
 router.get("/", auth, getTractors);
 router.post("/", auth, admin, createTractor);
 router.patch("/:id", auth, admin, updateTractor);
-router.delete("/:id", auth, admin, deleteTractor);
+router.delete("/:id", auth, admin, requireDeleteIntent, deleteTractor);
 
 module.exports = router;

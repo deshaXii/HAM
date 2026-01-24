@@ -2,6 +2,7 @@
 const { pool } = require("../config/db");
 const { broadcast } = require("../realtime/sse");
 const { v4: uuidv4 } = require("uuid");
+const { audit } = require("../utils/auditLog");
 const { parseIncomingVersion, assertVersion, bumpVersion } = require("../utils/plannerMeta");
 
 function safeArray(x) {
@@ -24,6 +25,7 @@ async function selectTrailers(conn = pool) {
   const [rows] = await conn.query(
     `SELECT id, code, plate
      FROM trailers
+     WHERE deleted_at IS NULL
      ORDER BY code ASC`
   );
   const [typeRows] = await conn.query(
@@ -35,6 +37,25 @@ async function selectTrailers(conn = pool) {
     typesMap.get(tr.trailer_id).push(tr.type_value);
   }
   return rows.map((r) => mapTrailerRow(r, typesMap));
+}
+
+
+async function selectTrailerById(id, conn = pool) {
+  const [rows] = await conn.query(
+    `SELECT id, code, plate, current_location
+     FROM trailers
+     WHERE id = ?
+     LIMIT 1`,
+    [id]
+  );
+  if (!rows || !rows[0]) return null;
+  const [typeRows] = await conn.query(
+    `SELECT type_value FROM trailer_types WHERE trailer_id = ? ORDER BY type_value ASC`,
+    [id]
+  );
+  const typesMap = new Map();
+  typesMap.set(id, (typeRows || []).map((r) => r.type_value));
+  return mapTrailerRow(rows[0], typesMap);
 }
 
 async function getTrailers(req, res) {
@@ -80,6 +101,8 @@ async function createTrailer(req, res) {
         [payload.id, tv]
       );
     }
+
+    await audit(conn, req, { action: "create", entity_type: "trailer", entity_id: id, before: null, after: payload });
 
     const meta = await bumpVersion(conn);
     const trailers = await selectTrailers(conn);
@@ -163,7 +186,11 @@ async function deleteTrailer(req, res) {
     await conn.beginTransaction();
     await assertVersion(conn, incomingVersion);
 
-    await conn.query("DELETE FROM trailers WHERE id = ?", [id]);
+    const before = await selectTrailerById(id, conn);
+
+    await conn.query("UPDATE trailers SET deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL", [id]);
+
+    await audit(conn, req, { action: "delete", entity_type: "trailer", entity_id: id, before, after: null });
 
     const meta = await bumpVersion(conn);
     const trailers = await selectTrailers(conn);

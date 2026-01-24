@@ -25,7 +25,7 @@ import ResourcePool from "./ResourcePool";
 import WeekView from "./WeekView";
 import DistanceEditor from "./DistanceEditor";
 import JobModal from "./JobModal";
-import { apiGetState, apiSaveState } from "../lib/api";
+import { apiGetState, apiSaveState, apiDeleteJob } from "../lib/api";
 import { useAuth } from "../contexts/AuthContext";
 
 /* ===== Helpers (محلية) ===== */
@@ -388,11 +388,16 @@ export default function Planner() {
 
   function deleteJob(jobId) {
     if (!window.confirm("Delete this job?")) return;
-    const next = {
-      ...state,
-      jobs: (state.jobs || []).filter((j) => j.id !== jobId),
-    };
-    persistIfAdmin(next);
+    (async () => {
+      try {
+        const r = await apiDeleteJob(jobId);
+        const nextJobs = r?.jobs || (state.jobs || []).filter((j) => j.id !== jobId);
+        setState((prev) => ({ ...prev, jobs: nextJobs, version: Number(r?.meta?.version || prev.version || 1) }));
+      } catch (e) {
+        console.error(e);
+        alert("Delete failed. Nothing was removed from the server.");
+      }
+    })();
   }
 
   function getJobById(id) {

@@ -2,6 +2,7 @@
 const { pool } = require("../config/db");
 const { broadcast } = require("../realtime/sse");
 const { v4: uuidv4 } = require("uuid");
+const { audit } = require("../utils/auditLog");
 const { parseIncomingVersion, assertVersion, bumpVersion } = require("../utils/plannerMeta");
 
 function safeArray(x) {
@@ -31,6 +32,7 @@ async function selectTractors(conn = pool) {
   const [rows] = await conn.query(
     `SELECT id, code, plate, current_location, double_manned
      FROM tractors
+     WHERE deleted_at IS NULL
      ORDER BY code ASC`
   );
   const [typeRows] = await conn.query(
@@ -42,6 +44,25 @@ async function selectTractors(conn = pool) {
     typesMap.get(tr.tractor_id).push(tr.type_value);
   }
   return rows.map((r) => mapTractorRow(r, typesMap));
+}
+
+
+async function selectTractorById(id, conn = pool) {
+  const [rows] = await conn.query(
+    `SELECT id, code, plate, current_location, double_manned
+     FROM tractors
+     WHERE id = ?
+     LIMIT 1`,
+    [id]
+  );
+  if (!rows || !rows[0]) return null;
+  const [typeRows] = await conn.query(
+    `SELECT type_value FROM tractor_types WHERE tractor_id = ? ORDER BY type_value ASC`,
+    [id]
+  );
+  const typesMap = new Map();
+  typesMap.set(id, (typeRows || []).map((r) => r.type_value));
+  return mapTractorRow(rows[0], typesMap);
 }
 
 async function getTractors(req, res) {
@@ -95,6 +116,8 @@ async function createTractor(req, res) {
         [payload.id, tv]
       );
     }
+
+    await audit(conn, req, { action: "create", entity_type: "tractor", entity_id: id, before: null, after: payload });
 
     const meta = await bumpVersion(conn);
     const tractors = await selectTractors(conn);
@@ -191,7 +214,11 @@ async function deleteTractor(req, res) {
     await conn.beginTransaction();
     await assertVersion(conn, incomingVersion);
 
-    await conn.query("DELETE FROM tractors WHERE id = ?", [id]);
+    const before = await selectTractorById(id, conn);
+
+    await conn.query("UPDATE tractors SET deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL", [id]);
+
+    await audit(conn, req, { action: "delete", entity_type: "tractor", entity_id: id, before, after: null });
 
     const meta = await bumpVersion(conn);
     const tractors = await selectTractors(conn);

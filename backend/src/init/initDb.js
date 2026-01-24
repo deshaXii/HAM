@@ -37,7 +37,8 @@ async function ensureUsersSchema() {
       email VARCHAR(150) NOT NULL UNIQUE,
       password_hash VARCHAR(255) NOT NULL,
       role ENUM('user','admin') NOT NULL DEFAULT 'user',
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      deleted_at DATETIME NULL
     ) ENGINE=InnoDB;
   `);
 
@@ -70,7 +71,15 @@ async function ensureUsersSchema() {
     await tryQuery(`UPDATE users SET role='user' WHERE role='viewer'`);
   }
 
-  // لو عندنا username ومفيش email/name، نملأهم
+  
+  // Soft delete support
+  const cols3 = await getColumnSet("users");
+  if (!cols3.has("deleted_at")) {
+    await tryQuery(`ALTER TABLE users ADD COLUMN deleted_at DATETIME NULL`);
+    await tryQuery(`CREATE INDEX idx_users_deleted_at ON users(deleted_at)`);
+  }
+
+// لو عندنا username ومفيش email/name، نملأهم
   const cols2 = await getColumnSet("users");
   if (cols2.has("username")) {
     await tryQuery(
@@ -135,6 +144,7 @@ async function ensureLegacyTables() {
       user_id INT,
       title VARCHAR(255),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      deleted_at DATETIME NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
     ) ENGINE=InnoDB;
   `);
@@ -146,6 +156,7 @@ async function ensureLegacyTables() {
       text VARCHAR(255),
       done TINYINT(1) DEFAULT 0,
       comment TEXT,
+      deleted_at DATETIME NULL,
       FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
     ) ENGINE=InnoDB;
   `);
@@ -168,6 +179,20 @@ async function ensureLegacyTables() {
   if (!itCols.has("comment")) {
     await tryQuery(`ALTER TABLE task_items ADD COLUMN comment TEXT NULL`);
   }
+  // Soft delete support for legacy tasks tables
+  const tcols2 = await getColumnSet("tasks");
+  if (!tcols2.has("deleted_at")) {
+    await tryQuery(`ALTER TABLE tasks ADD COLUMN deleted_at DATETIME NULL`);
+    await tryQuery(`CREATE INDEX idx_tasks_deleted_at ON tasks(deleted_at)`);
+  }
+
+  const itCols2 = await getColumnSet("task_items");
+  if (!itCols2.has("deleted_at")) {
+    await tryQuery(`ALTER TABLE task_items ADD COLUMN deleted_at DATETIME NULL`);
+    await tryQuery(`CREATE INDEX idx_task_items_deleted_at ON task_items(deleted_at)`);
+  }
+
+
 }
 
 async function ensureNormalizedPlannerTables() {
@@ -201,9 +226,17 @@ async function ensureNormalizedPlannerTables() {
       details TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      deleted_at DATETIME NULL,
       INDEX idx_agenda_day (day)
     ) ENGINE=InnoDB;
   `);
+
+  // Soft delete support for agenda_items
+  const aCols = await getColumnSet("agenda_items");
+  if (!aCols.has("deleted_at")) {
+    await tryQuery(`ALTER TABLE agenda_items ADD COLUMN deleted_at DATETIME NULL`);
+  }
+  await tryQuery(`CREATE INDEX idx_agenda_deleted_at ON agenda_items(deleted_at)`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS drivers (
@@ -277,7 +310,8 @@ async function ensureNormalizedPlannerTables() {
       from_name VARCHAR(200) NOT NULL,
       to_name VARCHAR(200) NOT NULL,
       km INT NOT NULL DEFAULT 0,
-      PRIMARY KEY (from_name, to_name)
+      PRIMARY KEY (from_name, to_name),
+      deleted_at DATETIME NULL
     ) ENGINE=InnoDB;
   `);
 
@@ -340,6 +374,42 @@ async function ensureNormalizedPlannerTables() {
       }),
     ]
   );
+
+
+  // ===== Safety: soft-delete columns (prevent irreversible data loss) =====
+  // We NEVER hard-delete planner resources. Instead we set deleted_at.
+  // This makes accidental deletion recoverable even before backups.
+  const softDeleteTables = ["drivers","tractors","trailers","locations","jobs","agenda_items",'users','tasks','task_items','distances'];
+  for (const tbl of softDeleteTables) {
+    const cols = await getColumnSet(tbl);
+    if (!cols.has("deleted_at")) {
+      await tryQuery(`ALTER TABLE \`${tbl}\` ADD COLUMN deleted_at DATETIME NULL`, []);
+      await tryQuery(`CREATE INDEX idx_${tbl}_deleted_at ON \`${tbl}\` (deleted_at)`, []);
+    }
+  }
+
+}
+
+async function ensureAuditLog() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      actor_user_id INT NULL,
+      actor_email VARCHAR(150) NULL,
+      actor_role VARCHAR(30) NULL,
+      action VARCHAR(30) NOT NULL,
+      entity_type VARCHAR(60) NOT NULL,
+      entity_id VARCHAR(128) NULL,
+      before_json JSON NULL,
+      after_json JSON NULL,
+      request_id VARCHAR(80) NULL,
+      ip VARCHAR(80) NULL,
+      user_agent VARCHAR(255) NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_audit_entity (entity_type, entity_id),
+      INDEX idx_audit_created (created_at)
+    ) ENGINE=InnoDB;
+  `);
 }
 
 async function seedLegacyRowsIfMissing() {
@@ -361,6 +431,9 @@ async function ensureInit() {
 
   // 3) normalized planner tables
   await ensureNormalizedPlannerTables();
+
+  // 3.1) audit log table
+  await ensureAuditLog();
 
   // 4) seed legacy essentials (NOTICES only)
   await seedLegacyRowsIfMissing();

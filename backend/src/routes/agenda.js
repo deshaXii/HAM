@@ -2,6 +2,7 @@
 const express = require("express");
 const { auth } = require("../middleware/auth");
 const { admin } = require("../middleware/admin");
+const { requireDeleteIntent } = require("../middleware/requireDeleteIntent");
 const {
   getAgenda,
   createAgendaItem,
@@ -14,6 +15,6 @@ const router = express.Router();
 router.get("/", auth, getAgenda);
 router.post("/", auth, admin, createAgendaItem);
 router.patch("/:id", auth, admin, updateAgendaItem);
-router.delete("/:id", auth, admin, deleteAgendaItem);
+router.delete("/:id", auth, admin, requireDeleteIntent, deleteAgendaItem);
 
 module.exports = router;

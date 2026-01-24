@@ -2,6 +2,7 @@
 const { pool } = require("../config/db");
 const { broadcast } = require("../realtime/sse");
 const { v4: uuidv4 } = require("uuid");
+const { audit } = require("../utils/auditLog");
 const {
   parseIncomingVersion,
   assertVersion,
@@ -120,6 +121,7 @@ async function selectJobs(conn = pool) {
     `SELECT id, date, start, slot, client, pickup, dropoff, duration_hours, pricing_type, pricing_value,
             tractor_id, trailer_id, notes
      FROM jobs
+     WHERE deleted_at IS NULL
      ORDER BY date ASC, slot ASC, start ASC`
   );
 
@@ -134,6 +136,26 @@ async function selectJobs(conn = pool) {
   }
 
   return rows.map((r) => mapJobRow(r, driverMap));
+}
+
+
+async function selectJobById(id, conn = pool) {
+  const [rows] = await conn.query(
+    `SELECT id, date, start, slot, client, pickup, dropoff, duration_hours, pricing_type, pricing_value,
+            tractor_id, trailer_id, notes
+     FROM jobs
+     WHERE id = ?
+     LIMIT 1`,
+    [id]
+  );
+  if (!rows || !rows[0]) return null;
+  const [drvRows] = await conn.query(
+    `SELECT driver_id FROM job_drivers WHERE job_id = ? ORDER BY driver_id ASC`,
+    [id]
+  );
+  const driverMap = new Map();
+  driverMap.set(id, (drvRows || []).map((r) => r.driver_id));
+  return mapJobRow(rows[0], driverMap);
 }
 
 async function getJobs(req, res) {
@@ -187,6 +209,8 @@ async function createJob(req, res) {
       );
     }
 
+    await audit(conn, req, { action: "create", entity_type: "job", entity_id: job.id, before: null, after: job });
+
     const meta = await bumpVersion(conn);
     await conn.commit();
 
@@ -227,11 +251,13 @@ async function updateJob(req, res) {
     await conn.beginTransaction();
     await assertVersion(conn, incomingVersion);
 
+    const before = await selectJobById(id, conn);
+
     await conn.query(
       `UPDATE jobs
        SET date=?, start=?, slot=?, client=?, pickup=?, dropoff=?, duration_hours=?, pricing_type=?, pricing_value=?,
            tractor_id=?, trailer_id=?, notes=?
-       WHERE id=?`,
+       WHERE id=? AND deleted_at IS NULL`,
       [
         job.date,
         job.start,
@@ -259,6 +285,15 @@ async function updateJob(req, res) {
       );
     }
 
+    const after = await selectJobById(id, conn);
+    await audit(conn, req, {
+      action: "update",
+      entity_type: "job",
+      entity_id: id,
+      before,
+      after,
+    });
+
     const meta = await bumpVersion(conn);
     await conn.commit();
 
@@ -272,13 +307,11 @@ async function updateJob(req, res) {
     } catch {}
     console.error("updateJob error:", e);
     const status = e.status || 500;
-    return res
-      .status(status)
-      .json({
-        error: e.message || "Failed to update job",
-        code: e.code,
-        meta: e.meta,
-      });
+    return res.status(status).json({
+      error: e.message || "Failed to update job",
+      code: e.code,
+      meta: e.meta,
+    });
   } finally {
     conn.release();
   }
@@ -295,7 +328,21 @@ async function deleteJob(req, res) {
     await conn.beginTransaction();
     await assertVersion(conn, incomingVersion);
 
-    await conn.query(`DELETE FROM jobs WHERE id = ?`, [id]);
+    const before = await selectJobById(id, conn);
+
+    // Soft delete to prevent permanent data loss.
+    await conn.query(
+      `UPDATE jobs SET deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL`,
+      [id]
+    );
+
+    await audit(conn, req, {
+      action: "delete",
+      entity_type: "job",
+      entity_id: id,
+      before,
+      after: null,
+    });
 
     const meta = await bumpVersion(conn);
     await conn.commit();
@@ -310,13 +357,11 @@ async function deleteJob(req, res) {
     } catch {}
     console.error("deleteJob error:", e);
     const status = e.status || 500;
-    return res
-      .status(status)
-      .json({
-        error: e.message || "Failed to delete job",
-        code: e.code,
-        meta: e.meta,
-      });
+    return res.status(status).json({
+      error: e.message || "Failed to delete job",
+      code: e.code,
+      meta: e.meta,
+    });
   } finally {
     conn.release();
   }
@@ -335,15 +380,14 @@ async function batchJobs(req, res) {
   try {
     await conn.beginTransaction();
     await assertVersion(conn, incomingVersion);
-
     if (deletes.length > 0) {
-      await conn.query(
-        `DELETE FROM jobs WHERE id IN (${deletes.map(() => "?").join(",")})`,
-        deletes
-      );
+      const err = new Error("Batch delete is disabled; use DELETE /jobs/:id");
+      err.status = 400;
+      err.code = "BATCH_DELETE_DISABLED";
+      throw err;
     }
 
-    for (const j of upserts) {
+for (const j of upserts) {
       await conn.query(
         `INSERT INTO jobs
           (id, date, start, slot, client, pickup, dropoff, duration_hours, pricing_type, pricing_value, tractor_id, trailer_id, notes)

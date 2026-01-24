@@ -2,6 +2,7 @@
 const express = require("express");
 const { auth } = require("../middleware/auth");
 const { admin } = require("../middleware/admin");
+const { requireDeleteIntent } = require("../middleware/requireDeleteIntent");
 const {
   getTrailers,
   createTrailer,
@@ -14,6 +15,6 @@ const router = express.Router();
 router.get("/", auth, getTrailers);
 router.post("/", auth, admin, createTrailer);
 router.patch("/:id", auth, admin, updateTrailer);
-router.delete("/:id", auth, admin, deleteTrailer);
+router.delete("/:id", auth, admin, requireDeleteIntent, deleteTrailer);
 
 module.exports = router;

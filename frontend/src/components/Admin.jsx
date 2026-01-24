@@ -6,7 +6,7 @@ import { TRACTOR_TAXONOMY } from "../constants/tractorTaxonomy";
 import { Plus, Trash2, Download, Upload, X, ImageIcon } from "lucide-react";
 import AdminExtras from "./AdminExtras";
 import { useAuth } from "../contexts/AuthContext";
-import { apiGetState, apiSaveState, apiUploadDriverPhoto } from "../lib/api";
+import { apiGetState, apiSaveState, apiUploadDriverPhoto, apiDeleteTractor, apiDeleteTrailer } from "../lib/api";
 import * as XLSX from "xlsx";
 
 // ========== DEFAULT STATE ==========
@@ -144,16 +144,6 @@ function parseJobSlot(val) {
 }
 
 function exportStateToExcel(anyState) {
-  const driversSheetData = (anyState.drivers || []).map((d) => ({
-    id: d.id,
-    name: d.name,
-    code: d.code || "",
-    canNight: d.canNight ? 1 : 0,
-    sleepsInCab: d.sleepsInCab ? 1 : 0,
-    doubleMannedEligible: d.doubleMannedEligible ? 1 : 0,
-    rating: Number.isFinite(Number(d.rating)) ? Number(d.rating) : "",
-    photoUrl: d.photoUrl || "",
-  }));
 
   const tractorsSheetData = (anyState.tractors || []).map((t) => ({
     id: t.id,
@@ -191,11 +181,6 @@ function exportStateToExcel(anyState) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(
     wb,
-    XLSX.utils.json_to_sheet(driversSheetData),
-    "Drivers"
-  );
-  XLSX.utils.book_append_sheet(
-    wb,
     XLSX.utils.json_to_sheet(tractorsSheetData),
     "Tractors"
   );
@@ -223,20 +208,6 @@ function importExcelFile(file, setDraft) {
       if (!ws) return [];
       return XLSX.utils.sheet_to_json(ws, { defval: "" });
     };
-
-    const importedDrivers = sheetToJSON("Drivers").map((row) => ({
-      id: row.id || crypto.randomUUID(),
-      name: row.name || "",
-      code: row.code || "",
-      canNight: parseBool(row.canNight),
-      sleepsInCab: parseBool(row.sleepsInCab),
-      doubleMannedEligible: parseBool(row.doubleMannedEligible),
-      rating: Number.isFinite(Number(row.rating)) ? Number(row.rating) : 0,
-      photoUrl: row.photoUrl || "",
-      // لو مش موجودة في الإكسل، خليه كل الأيام
-      weekAvailability: [0, 1, 2, 3, 4, 5, 6],
-      leaves: [],
-    }));
 
     const importedTractors = sheetToJSON("Tractors").map((row) => ({
       id: row.id || crypto.randomUUID(),
@@ -277,7 +248,6 @@ function importExcelFile(file, setDraft) {
     setDraft((prev) =>
       buildSafeState({
         ...prev,
-        drivers: importedDrivers,
         tractors: importedTractors,
         trailers: importedTrailers,
         jobs: importedJobs,
@@ -436,7 +406,7 @@ export default function Admin() {
     if (file) {
       if (
         window.confirm(
-          "This will OVERWRITE your current draft (drivers / tractors / trailers / jobs). Continue?"
+          "This will OVERWRITE your current draft (tractors / trailers / jobs). Drivers are managed from the Drivers page. Continue?"
         )
       ) {
         importExcelFile(file, (updater) => {
@@ -467,6 +437,20 @@ export default function Admin() {
       return markDirty(next);
     });
   };
+
+const deleteItem = async (type, id) => {
+  if (!isAdmin) return;
+  try {
+    if (type === "tractors") await apiDeleteTractor(id);
+    else if (type === "trailers") await apiDeleteTrailer(id);
+    // after server soft-delete, remove from local draft
+    deleteDraftItem(type, id);
+  } catch (e) {
+    console.error(e);
+    alert("Delete failed. Nothing was removed from the server.");
+  }
+};
+
 
   const updateDraftItem = (type, id, field, value) => {
     setDraft((prev) => {
@@ -517,11 +501,11 @@ export default function Admin() {
               onClick={handleExportExcel}
               className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
             >
-              <Download size={16} /> Export Excel
+              <Download size={16} /> Export Excel (No Drivers)
             </button>
 
             <label className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors cursor-pointer text-sm font-medium">
-              <Upload size={16} /> Import Excel
+              <Upload size={16} /> Import Excel (No Drivers)
               <input
                 type="file"
                 accept=".xlsx,.xls"
@@ -643,7 +627,7 @@ export default function Admin() {
                         <Td right>
                           <button
                             onClick={() =>
-                              deleteDraftItem("tractors", tractor.id)
+                              deleteItem("tractors", tractor.id)
                             }
                             className="text-red-600 hover:text-red-800 p-2 rounded-full hover:bg-red-50 transition-colors"
                             title="Delete tractor"
@@ -734,7 +718,7 @@ export default function Admin() {
                         <Td right>
                           <button
                             onClick={() =>
-                              deleteDraftItem("trailers", trailer.id)
+                              deleteItem("trailers", trailer.id)
                             }
                             className="text-red-600 hover:text-red-800 p-2 rounded-full hover:bg-red-50 transition-colors"
                             title="Delete trailer"
@@ -743,52 +727,6 @@ export default function Admin() {
                           </button>
                         </Td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </SectionCard>
-
-            <SectionCard
-              title="Drivers Management"
-              addLabel="Add Driver"
-              onAdd={() =>
-                addDraftItem("drivers", {
-                  name: "New Driver",
-                  code: "",
-                  canNight: true,
-                  sleepsInCab: false,
-                  doubleMannedEligible: true,
-                  rating: 0,
-                  photoUrl: "",
-                  weekAvailability: [0, 1, 2, 3, 4, 5, 6],
-                  leaves: [],
-                })
-              }
-            >
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs md:text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <Th>Photo</Th>
-                      <Th>Name</Th>
-                      <Th center>Night Shift</Th>
-                      <Th center>Sleeps in Cab</Th>
-                      <Th center>2-man Eligible</Th>
-                      <Th center>Rating</Th>
-                      <Th right>Actions</Th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {(draft?.drivers || []).map((driver) => (
-                      <DriverRow
-                        key={driver.id}
-                        driver={driver}
-                        onChange={(field, value) =>
-                          updateDraftItem("drivers", driver.id, field, value)
-                        }
-                        onDelete={() => deleteDraftItem("drivers", driver.id)}
-                      />
                     ))}
                   </tbody>
                 </table>

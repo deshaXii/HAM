@@ -2,6 +2,7 @@
 const express = require("express");
 const { auth } = require("../middleware/auth");
 const { admin } = require("../middleware/admin");
+const { requireDeleteIntent } = require("../middleware/requireDeleteIntent");
 const {
   getDrivers,
   createDriver,
@@ -14,6 +15,6 @@ const router = express.Router();
 router.get("/", auth, getDrivers);
 router.post("/", auth, admin, createDriver);
 router.patch("/:id", auth, admin, updateDriver);
-router.delete("/:id", auth, admin, deleteDriver);
+router.delete("/:id", auth, admin, requireDeleteIntent, deleteDriver);
 
 module.exports = router;

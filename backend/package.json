@@ -6,7 +6,9 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "backup:db": "bash ./scripts/backup-db.sh",
+    "restore:db": "bash ./scripts/restore-db.sh"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

@@ -2,6 +2,7 @@
 const { pool } = require("../config/db");
 const { broadcast } = require("../realtime/sse");
 const { v4: uuidv4 } = require("uuid");
+const { audit } = require("../utils/auditLog");
 const {
   parseIncomingVersion,
   assertVersion,
@@ -48,9 +49,23 @@ async function selectDrivers(conn = pool) {
     `SELECT id, name, code, photo_url, can_night, sleeps_in_cab, double_manned_eligible,
             week_availability_json, leaves_json
      FROM drivers
+     WHERE deleted_at IS NULL
      ORDER BY name ASC`
   );
   return rows.map(mapDriverRow);
+}
+
+
+async function selectDriverById(id, conn = pool) {
+  const [rows] = await conn.query(
+    `SELECT id, name, code, photo_url, can_night, sleeps_in_cab, double_manned_eligible,
+            week_availability_json, leaves_json
+     FROM drivers
+     WHERE id = ?
+     LIMIT 1`,
+    [id]
+  );
+  return rows && rows[0] ? mapDriverRow(rows[0]) : null;
 }
 
 async function getDrivers(req, res) {
@@ -103,7 +118,6 @@ async function createDriver(req, res) {
         JSON.stringify(payload.leaves),
       ]
     );
-
     const meta = await bumpVersion(conn);
     const drivers = await selectDrivers(conn);
 
@@ -195,7 +209,6 @@ async function updateDriver(req, res) {
     vals.push(id);
 
     await conn.query(`UPDATE drivers SET ${sets.join(", ")} WHERE id = ?`, vals);
-
     const meta = await bumpVersion(conn);
     const drivers = await selectDrivers(conn);
 
@@ -225,8 +238,11 @@ async function deleteDriver(req, res) {
     await conn.beginTransaction();
     await assertVersion(conn, incomingVersion);
 
-    await conn.query("DELETE FROM drivers WHERE id = ?", [id]);
+    const before = await selectDriverById(id, conn);
 
+    await conn.query("UPDATE drivers SET deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL", [id]);
+
+    await audit(conn, req, { action: "delete", entity_type: "driver", entity_id: id, before, after: null });
     const meta = await bumpVersion(conn);
     const drivers = await selectDrivers(conn);
 

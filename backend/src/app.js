@@ -29,7 +29,7 @@ const app = express();
 app.use(
   cors({
     origin: "*",
-    allowedHeaders: ["Content-Type", "Authorization", "X-Planner-Version"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Planner-Version", "X-Delete-Intent"],
     exposedHeaders: ["X-Planner-Version"],
   })
 );

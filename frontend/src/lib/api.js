@@ -109,6 +109,12 @@ function plannerHeaders(version) {
   return h;
 }
 
+function plannerDeleteHeaders(version) {
+  const h = plannerHeaders(version);
+  h["X-Delete-Intent"] = "1";
+  return h;
+}
+
 function deepEqual(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
@@ -193,6 +199,19 @@ export async function apiSaveState(nextState) {
 
   const prev = __plannerLastState;
 
+
+  // Safety: if a screen produces partial state (missing lists), treat it as "no change".
+  // This prevents accidental deletes/overwrites.
+  nextState = {
+    ...nextState,
+    drivers: safeList(nextState.drivers, prev.drivers),
+    tractors: safeList(nextState.tractors, prev.tractors),
+    trailers: safeList(nextState.trailers, prev.trailers),
+    locations: safeList(nextState.locations, prev.locations),
+    jobs: safeList(nextState.jobs, prev.jobs),
+    agenda: safeList(nextState.agenda, prev.agenda),
+  };
+
   // Quick no-op
   if (deepEqual(prev, nextState)) return prev;
 
@@ -268,6 +287,8 @@ export async function apiSaveState(nextState) {
   // 3) Drivers
   {
     const d = diffList(prev.drivers, nextState.drivers);
+    // Safety: deletes must be explicit (user-intent). No implicit deletes during state saves.
+    d.deletes = [];
     for (const id of d.deletes) {
       const r = await doDelete(`${BASE}/drivers/${encodeURIComponent(id)}`);
       if (r?.drivers) current.drivers = r.drivers;
@@ -287,6 +308,8 @@ export async function apiSaveState(nextState) {
   // 4) Tractors
   {
     const d = diffList(prev.tractors, nextState.tractors);
+    // Safety: deletes must be explicit (user-intent). No implicit deletes during state saves.
+    d.deletes = [];
     for (const id of d.deletes) {
       const r = await doDelete(`${BASE}/tractors/${encodeURIComponent(id)}`);
       if (r?.tractors) current.tractors = r.tractors;
@@ -306,6 +329,8 @@ export async function apiSaveState(nextState) {
   // 5) Trailers
   {
     const d = diffList(prev.trailers, nextState.trailers);
+    // Safety: deletes must be explicit (user-intent). No implicit deletes during state saves.
+    d.deletes = [];
     for (const id of d.deletes) {
       const r = await doDelete(`${BASE}/trailers/${encodeURIComponent(id)}`);
       if (r?.trailers) current.trailers = r.trailers;
@@ -325,6 +350,8 @@ export async function apiSaveState(nextState) {
   // 6) Locations
   {
     const d = diffList(prev.locations, nextState.locations);
+    // Safety: deletes must be explicit (user-intent). No implicit deletes during state saves.
+    d.deletes = [];
     for (const id of d.deletes) {
       const r = await doDelete(`${BASE}/locations/${encodeURIComponent(id)}`);
       if (r?.locations) current.locations = r.locations;
@@ -352,6 +379,8 @@ export async function apiSaveState(nextState) {
   // 8) Jobs – batch when there are multiple changes
   {
     const d = diffList(prev.jobs, nextState.jobs);
+    // Safety: deletes must be explicit (user-intent). No implicit deletes during state saves.
+    d.deletes = [];
     const totalChanges = d.creates.length + d.updates.length + d.deletes.length;
 
     if (totalChanges === 1) {
@@ -384,6 +413,8 @@ export async function apiSaveState(nextState) {
     const nextAgenda = Array.isArray(nextState.agenda) ? nextState.agenda : [];
 
     const d = diffList(prevAgenda, nextAgenda);
+    // Safety: deletes must be explicit (user-intent). No implicit deletes during state saves.
+    d.deletes = [];
     const totalChanges = d.creates.length + d.updates.length + d.deletes.length;
 
     // optimistic local copy
@@ -627,4 +658,60 @@ export async function apiUploadDriverPhoto(driverId, file) {
         "Failed to upload driver photo (تأكد إنك عامل الراوت في السيرفر)."
     );
   return j; // { url }
+}
+
+
+// -------- Explicit Deletes (requires X-Delete-Intent) --------
+async function ensureBaselineForDelete() {
+  if (!__plannerLastState) {
+    __plannerLastState = await apiGetState();
+  }
+  return __plannerLastState;
+}
+
+async function doExplicitDelete(url, updater) {
+  const prev = await ensureBaselineForDelete();
+  let version = Number(prev.version || 1);
+  const r = await fetchJson(url, {
+    method: "DELETE",
+    headers: plannerDeleteHeaders(version),
+  });
+  if (r?.meta?.version) version = Number(r.meta.version);
+  if (__plannerLastState) {
+    __plannerLastState = { ...__plannerLastState, version };
+    if (typeof updater === "function") updater(r);
+  }
+  return r;
+}
+
+export async function apiDeleteDriver(id) {
+  return doExplicitDelete(`${BASE}/drivers/${encodeURIComponent(id)}`, (r) => {
+    if (r?.drivers) __plannerLastState = { ...__plannerLastState, drivers: r.drivers };
+  });
+}
+export async function apiDeleteTractor(id) {
+  return doExplicitDelete(`${BASE}/tractors/${encodeURIComponent(id)}`, (r) => {
+    if (r?.tractors) __plannerLastState = { ...__plannerLastState, tractors: r.tractors };
+  });
+}
+export async function apiDeleteTrailer(id) {
+  return doExplicitDelete(`${BASE}/trailers/${encodeURIComponent(id)}`, (r) => {
+    if (r?.trailers) __plannerLastState = { ...__plannerLastState, trailers: r.trailers };
+  });
+}
+export async function apiDeleteLocation(id) {
+  return doExplicitDelete(`${BASE}/locations/${encodeURIComponent(id)}`, (r) => {
+    if (r?.locations) __plannerLastState = { ...__plannerLastState, locations: r.locations };
+    if (r?.distanceKm) __plannerLastState = { ...__plannerLastState, distanceKm: r.distanceKm };
+  });
+}
+export async function apiDeleteJob(id) {
+  return doExplicitDelete(`${BASE}/jobs/${encodeURIComponent(id)}`, (r) => {
+    if (r?.jobs) __plannerLastState = { ...__plannerLastState, jobs: r.jobs };
+  });
+}
+export async function apiDeleteAgendaItem(id) {
+  return doExplicitDelete(`${BASE}/agenda/${encodeURIComponent(id)}`, (r) => {
+    if (r?.agenda) __plannerLastState = { ...__plannerLastState, agenda: r.agenda };
+  });
 }

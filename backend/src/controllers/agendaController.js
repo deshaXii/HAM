@@ -2,17 +2,24 @@
 const { pool } = require("../config/db");
 const { broadcast } = require("../realtime/sse");
 const { v4: uuidv4 } = require("uuid");
+const { audit } = require("../utils/auditLog");
 
 /* ---------------- Meta/version helpers (self-contained) ---------------- */
 
 function toISODateOnly(d) {
   if (!d) return null;
-  try {
-    // MySQL DATE → JS Date
-    return new Date(d).toISOString().slice(0, 10);
-  } catch {
-    return null;
-  }
+
+  // If mysql2 returns DATE as string, keep it.
+  if (typeof d === "string") return d.slice(0, 10);
+
+  const dt = d instanceof Date ? d : new Date(d);
+  if (Number.isNaN(dt.getTime())) return null;
+
+  // IMPORTANT: return local YYYY-MM-DD (no timezone shift)
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, "0");
+  const da = String(dt.getDate()).padStart(2, "0");
+  return `${y}-${m}-${da}`;
 }
 
 function parseIncomingVersion(req) {
@@ -89,6 +96,7 @@ async function selectAgenda(conn) {
   const [rows] = await conn.query(
     `SELECT id, day, start_time, end_time, type, title, details
      FROM agenda_items
+     WHERE deleted_at IS NULL
      ORDER BY day ASC, start_time ASC, title ASC`
   );
 
@@ -101,6 +109,21 @@ async function selectAgenda(conn) {
     title: r.title || "",
     details: r.details || "",
   }));
+}
+
+
+
+function mapAgendaRow(r) {
+  if (!r) return null;
+  return {
+    id: r.id,
+    day: toISODateOnly(r.day),
+    start: r.start_time,
+    end: r.end_time,
+    type: r.type || "normal",
+    title: r.title || "",
+    details: r.details || "",
+  };
 }
 
 async function withTx(fn) {
@@ -121,6 +144,19 @@ async function withTx(fn) {
 }
 
 /* ---------------- Controllers ---------------- */
+
+
+async function selectAgendaItemById(id, conn = pool) {
+  const [rows] = await conn.query(
+    `SELECT id, day, start_time, end_time, type, title, details
+     FROM agenda_items
+     WHERE id = ? AND deleted_at IS NULL
+     LIMIT 1`,
+    [id]
+  );
+  if (!rows || !rows[0]) return null;
+  return mapAgendaRow(rows[0]);
+}
 
 async function getAgenda(req, res, next) {
   try {
@@ -159,6 +195,8 @@ async function createAgendaItem(req, res, next) {
         [id, day, start, end, type, title, details]
       );
 
+      await audit(conn, req, { action: "create", entity_type: "agenda", entity_id: id, before: null, after: { id, day, start, end, type, title, details } });
+
       const meta = await bumpVersion(conn);
       const agenda = await selectAgenda(conn);
       return { meta, agenda };
@@ -194,21 +232,40 @@ async function updateAgendaItem(req, res, next) {
     const out = await withTx(async (conn) => {
       await assertVersion(conn, incomingVersion);
 
+      const before = await selectAgendaItemById(id, conn);
+
       const [r] = await conn.query(
         `UPDATE agenda_items
          SET day=?, start_time=?, end_time=?, type=?, title=?, details=?
-         WHERE id=?`,
+         WHERE id=? AND deleted_at IS NULL`,
         [day, start, end, type, title, details, id]
       );
 
-      // لو مش موجود (edge)، اعمل upsert بسيط
+      // If missing (edge), upsert and clear deleted_at.
       if (r.affectedRows === 0) {
         await conn.query(
-          `INSERT INTO agenda_items (id, day, start_time, end_time, type, title, details)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO agenda_items (id, day, start_time, end_time, type, title, details, deleted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+           ON DUPLICATE KEY UPDATE
+             day=VALUES(day),
+             start_time=VALUES(start_time),
+             end_time=VALUES(end_time),
+             type=VALUES(type),
+             title=VALUES(title),
+             details=VALUES(details),
+             deleted_at=NULL`,
           [id, day, start, end, type, title, details]
         );
       }
+
+      const after = await selectAgendaItemById(id, conn);
+      await audit(conn, req, {
+        action: "update",
+        entity_type: "agenda",
+        entity_id: id,
+        before,
+        after,
+      });
 
       const meta = await bumpVersion(conn);
       const agenda = await selectAgenda(conn);
@@ -230,7 +287,21 @@ async function deleteAgendaItem(req, res, next) {
     const out = await withTx(async (conn) => {
       await assertVersion(conn, incomingVersion);
 
-      await conn.query(`DELETE FROM agenda_items WHERE id=?`, [id]);
+      const before = await selectAgendaItemById(id, conn);
+
+      // Soft delete (recoverable)
+      await conn.query(
+        `UPDATE agenda_items SET deleted_at = NOW() WHERE id=? AND deleted_at IS NULL`,
+        [id]
+      );
+
+      await audit(conn, req, {
+        action: "delete",
+        entity_type: "agenda",
+        entity_id: id,
+        before,
+        after: null,
+      });
 
       const meta = await bumpVersion(conn);
       const agenda = await selectAgenda(conn);

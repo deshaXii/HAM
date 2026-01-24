@@ -2,6 +2,7 @@
 const { pool } = require("../config/db");
 const { broadcast } = require("../realtime/sse");
 const { parseIncomingVersion, assertVersion, bumpVersion } = require("../utils/plannerMeta");
+const { audit } = require("../utils/auditLog");
 
 function safeObj(x) {
   return typeof x === "object" && x !== null ? x : {};
@@ -14,9 +15,16 @@ function safeNum(x, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+
+
+async function getActiveCount(conn = pool) {
+  const [rows] = await conn.query("SELECT COUNT(*) AS c FROM distances WHERE deleted_at IS NULL");
+  return Number(rows?.[0]?.c || 0);
+}
+
 async function selectDistanceMatrix(conn = pool) {
   const [rows] = await conn.query(
-    `SELECT from_name, to_name, km FROM distances`
+    `SELECT from_name, to_name, km FROM distances WHERE deleted_at IS NULL`
   );
   const distanceKm = {};
   for (const r of rows) {
@@ -55,12 +63,24 @@ async function upsertDistance(req, res) {
     await conn.beginTransaction();
     await assertVersion(conn, incomingVersion);
 
+    const beforeCount = await getActiveCount(conn);
+
     await conn.query(
       `INSERT INTO distances (from_name, to_name, km)
        VALUES (?,?,?)
-       ON DUPLICATE KEY UPDATE km = VALUES(km)`,
+       ON DUPLICATE KEY UPDATE km = VALUES(km), deleted_at = NULL`,
       [fromName, toName, km]
     );
+
+    const afterCount = await getActiveCount(conn);
+
+    await audit(conn, req, {
+      action: "update",
+      entity_type: "distances",
+      entity_id: null,
+      before: { activeCount: beforeCount },
+      after: { activeCount: afterCount }
+    });
 
     const meta = await bumpVersion(conn);
     const distanceKm = await selectDistanceMatrix(conn);
@@ -87,12 +107,21 @@ async function replaceMatrix(req, res) {
   const body = req.body || {};
   const matrix = safeObj(body.distanceKm);
 
+  const intent = String(req.headers['x-delete-intent'] || '').trim().toLowerCase();
+  const allowClear = intent === '1' || intent === 'true' || intent === 'yes';
+
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
     await assertVersion(conn, incomingVersion);
 
-    await conn.query("DELETE FROM distances");
+    const beforeCount = await getActiveCount(conn);
+
+    // Optional clear (only when X-Delete-Intent is provided).
+    // Without intent header we do SAFE upsert-only to avoid any data loss from client-side state bugs.
+    if (allowClear) {
+      await conn.query("UPDATE distances SET deleted_at = NOW() WHERE deleted_at IS NULL");
+    }
 
     for (const fromKey of Object.keys(matrix)) {
       const fromName = safeStr(fromKey, 200).trim();
@@ -103,11 +132,21 @@ async function replaceMatrix(req, res) {
         if (!toName) continue;
         const km = Math.max(0, Math.round(safeNum(inner[toKey], 0)));
         await conn.query(
-          `INSERT INTO distances (from_name, to_name, km) VALUES (?,?,?)`,
+          `INSERT INTO distances (from_name, to_name, km, deleted_at) VALUES (?,?,?,NULL) ON DUPLICATE KEY UPDATE km=VALUES(km), deleted_at=NULL`,
           [fromName, toName, km]
         );
       }
     }
+
+    const afterCount = await getActiveCount(conn);
+
+    await audit(conn, req, {
+      action: "replace",
+      entity_type: "distances",
+      entity_id: null,
+      before: { activeCount: beforeCount },
+      after: { activeCount: afterCount }
+    });
 
     const meta = await bumpVersion(conn);
     const distanceKm = await selectDistanceMatrix(conn);

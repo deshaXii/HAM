@@ -1,5 +1,6 @@
 const { pool } = require("../config/db");
 const { broadcast } = require("../realtime/sse");
+const { audit } = require("../utils/auditLog");
 
 async function getTasks(req, res) {
   // نجيب التاسكات ومعاها الايتيمز
@@ -7,11 +8,12 @@ async function getTasks(req, res) {
     `SELECT t.id, t.user_id, t.title, t.created_at, u.name AS user_name
      FROM tasks t
      LEFT JOIN users u ON t.user_id = u.id
+     WHERE t.deleted_at IS NULL
      ORDER BY t.id DESC`
   );
 
   const [items] = await pool.query(
-    `SELECT id, task_id, text, done, comment FROM task_items ORDER BY id ASC`
+    `SELECT id, task_id, text, done, comment FROM task_items WHERE deleted_at IS NULL ORDER BY id ASC`
   );
 
   const map = {};
@@ -69,7 +71,7 @@ async function createTaskForUser(req, res) {
 async function getMyTasks(req, res) {
   const userId = req.user.id;
   const [tasks] = await pool.query(
-    `SELECT id, user_id, title, created_at FROM tasks WHERE user_id=? ORDER BY id DESC`,
+    `SELECT id, user_id, title, created_at FROM tasks WHERE user_id=? AND deleted_at IS NULL ORDER BY id DESC`,
     [userId]
   );
   const taskIds = tasks.map((t) => t.id);
@@ -78,7 +80,7 @@ async function getMyTasks(req, res) {
     const [rows] = await pool.query(
       `SELECT id, task_id, text, done, comment
        FROM task_items
-       WHERE task_id IN (${taskIds.map(() => "?").join(",")})`,
+       WHERE deleted_at IS NULL AND task_id IN (${taskIds.map(() => "?").join(",")})`,
       taskIds
     );
     items = rows;
@@ -120,7 +122,7 @@ async function updateTask(req, res) {
   if (updates.length) {
     params.push(taskId);
     await pool.query(
-      `UPDATE tasks SET ${updates.join(", ")} WHERE id=?`,
+      `UPDATE tasks SET ${updates.join(", ")} WHERE id=? AND deleted_at IS NULL`,
       params
     );
   }
@@ -130,21 +132,48 @@ async function updateTask(req, res) {
 
 async function deleteTask(req, res) {
   const { taskId } = req.params;
-  await pool.query(`DELETE FROM tasks WHERE id=?`, [taskId]);
-  broadcast("task:deleted", { taskId });
+
+  // قبل الحذف: هات بيانات التسك (لو موجودة ومش محذوفة)
+  const [rows] = await pool.query(
+    `SELECT id, user_id, title, created_at FROM tasks WHERE id=? AND deleted_at IS NULL`,
+    [taskId]
+  );
+  if (rows.length === 0) {
+    return res.json({ ok: true });
+  }
+
+  const before = {
+    id: rows[0].id,
+    userId: rows[0].user_id,
+    title: rows[0].title,
+    createdAt: rows[0].created_at,
+  };
+
+  // Soft delete للتسك + كل العناصر التابعة
+  await pool.query(`UPDATE tasks SET deleted_at = NOW() WHERE id=? AND deleted_at IS NULL`, [taskId]);
+  await pool.query(`UPDATE task_items SET deleted_at = NOW() WHERE task_id=? AND deleted_at IS NULL`, [taskId]);
+
+  await audit(null, req, {
+    action: 'delete',
+    entity_type: 'task',
+    entity_id: String(taskId),
+    before,
+    after: null,
+  });
+
+  broadcast('task:deleted', { taskId });
   res.json({ ok: true });
 }
 
 async function canEditItem(reqUser, itemId) {
-  // لو مفيش auth middleware بيملا req.user، لازم تتأكد منه
   if (!reqUser) return false;
-  if (reqUser.role === "admin") return true;
+  if (reqUser.role === 'admin') return true;
 
   const [rows] = await pool.query(
     `SELECT t.user_id
      FROM task_items i
      JOIN tasks t ON t.id = i.task_id
-     WHERE i.id = ?`,
+     WHERE i.id = ? AND i.deleted_at IS NULL AND t.deleted_at IS NULL`,
     [itemId]
   );
   if (rows.length === 0) return false;
@@ -178,7 +207,7 @@ async function updateTaskItem(req, res) {
 
   params.push(itemId);
   await pool.query(
-    `UPDATE task_items SET ${fields.join(", ")} WHERE id=?`,
+    `UPDATE task_items SET ${fields.join(", ")} WHERE id=? AND deleted_at IS NULL`,
     params
   );
   broadcast("task:item-updated", { itemId });
@@ -189,11 +218,36 @@ async function deleteTaskItem(req, res) {
   const { itemId } = req.params;
 
   if (!(await canEditItem(req.user, itemId))) {
-    return res.status(403).json({ message: "Forbidden: owner or admin only" });
+    return res.status(403).json({ message: 'Forbidden: owner or admin only' });
   }
 
-  await pool.query(`DELETE FROM task_items WHERE id=?`, [itemId]);
-  broadcast("task:item-deleted", { itemId });
+  const [rows] = await pool.query(
+    `SELECT id, task_id, text, done, comment FROM task_items WHERE id=? AND deleted_at IS NULL`,
+    [itemId]
+  );
+  if (rows.length === 0) {
+    return res.json({ ok: true });
+  }
+
+  const before = {
+    id: rows[0].id,
+    taskId: rows[0].task_id,
+    text: rows[0].text,
+    done: !!rows[0].done,
+    comment: rows[0].comment,
+  };
+
+  await pool.query(`UPDATE task_items SET deleted_at = NOW() WHERE id=? AND deleted_at IS NULL`, [itemId]);
+
+  await audit(null, req, {
+    action: 'delete',
+    entity_type: 'task_item',
+    entity_id: String(itemId),
+    before,
+    after: null,
+  });
+
+  broadcast('task:item-deleted', { itemId });
   res.json({ ok: true });
 }
 

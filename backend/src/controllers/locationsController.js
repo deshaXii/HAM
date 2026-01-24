@@ -2,6 +2,7 @@
 const { pool } = require("../config/db");
 const { broadcast } = require("../realtime/sse");
 const { v4: uuidv4 } = require("uuid");
+const { audit } = require("../utils/auditLog");
 const { parseIncomingVersion, assertVersion, bumpVersion } = require("../utils/plannerMeta");
 
 function safeStr(x, max = 200) {
@@ -16,6 +17,7 @@ async function selectLocations(conn = pool) {
   const [rows] = await conn.query(
     `SELECT id, name, lat, lng
      FROM locations
+     WHERE deleted_at IS NULL
      ORDER BY name ASC`
   );
   return rows.map((r) => ({
@@ -24,6 +26,25 @@ async function selectLocations(conn = pool) {
     lat: r.lat === null ? null : Number(r.lat),
     lng: r.lng === null ? null : Number(r.lng),
   }));
+}
+
+
+async function selectLocationById(id, conn = pool) {
+  const [rows] = await conn.query(
+    `SELECT id, name, lat, lng
+     FROM locations
+     WHERE id = ?
+     LIMIT 1`,
+    [id]
+  );
+  if (!rows || !rows[0]) return null;
+  const r = rows[0];
+  return {
+    id: r.id,
+    name: r.name,
+    lat: r.lat === null ? null : Number(r.lat),
+    lng: r.lng === null ? null : Number(r.lng),
+  };
 }
 
 async function getLocations(req, res) {
@@ -57,6 +78,8 @@ async function createLocation(req, res) {
       `INSERT INTO locations (id, name, lat, lng) VALUES (?,?,?,?)`,
       [id, name, lat, lng]
     );
+
+    await audit(conn, req, { action: "create", entity_type: "location", entity_id: id, before: null, after: { id, name, lat, lng } });
 
     const meta = await bumpVersion(conn);
     const locations = await selectLocations(conn);
@@ -166,7 +189,11 @@ async function deleteLocation(req, res) {
     const [rows] = await conn.query(`SELECT name FROM locations WHERE id = ?`, [id]);
     const name = rows && rows[0] ? rows[0].name : null;
 
-    await conn.query("DELETE FROM locations WHERE id = ?", [id]);
+    const before = await selectLocationById(id, conn);
+
+    await conn.query("UPDATE locations SET deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL", [id]);
+
+    await audit(conn, req, { action: "delete", entity_type: "location", entity_id: id, before, after: null });
     if (name) {
       await conn.query(`DELETE FROM distances WHERE from_name = ? OR to_name = ?`, [name, name]);
     }

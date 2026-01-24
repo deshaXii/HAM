@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { GoogleMap, Marker, useLoadScript } from "@react-google-maps/api";
 import { MapPin, Save, Trash2, Loader2 } from "lucide-react";
-import { apiGetState, apiSaveState } from "../lib/api";
+import { apiGetState, apiSaveState, apiDeleteLocation } from "../lib/api";
 import { useAuth } from "../contexts/AuthContext";
 
 // مركز هولندا
@@ -147,13 +147,21 @@ export default function LocationsMap() {
 
   const removeLocation = (locId) => {
     if (!state) return;
-    const keep = state.locations.filter((l) => l.id !== locId);
-    const newMatrix = buildDistanceMatrixFromLocations(keep);
-    setState({
-      ...state,
-      locations: keep,
-      distanceKm: newMatrix,
-    });
+    (async () => {
+      try {
+        await apiDeleteLocation(locId);
+        const keep = state.locations.filter((l) => l.id !== locId);
+        const newMatrix = buildDistanceMatrixFromLocations(keep);
+        setState({
+          ...state,
+          locations: keep,
+          distanceKm: newMatrix,
+        });
+      } catch (e) {
+        console.error(e);
+        alert("Delete failed. Nothing was removed from the server.");
+      }
+    })();
   };
 
   const saveAll = async () => {

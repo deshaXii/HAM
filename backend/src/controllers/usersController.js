@@ -2,10 +2,11 @@
 const { pool } = require("../config/db");
 const { hashPassword } = require("../utils/password");
 const { broadcast } = require("../realtime/sse");
+const { audit } = require("../utils/auditLog");
 
 async function listUsers(req, res) {
   const [rows] = await pool.query(
-    `SELECT id, name, email, role, created_at FROM users ORDER BY id DESC`
+    `SELECT id, name, email, role, created_at FROM users WHERE deleted_at IS NULL ORDER BY id DESC`
   );
   res.json(rows);
 }
@@ -42,7 +43,7 @@ async function updateUser(req, res) {
   }
 
   params.push(id);
-  await pool.query(`UPDATE users SET ${fields.join(", ")} WHERE id=?`, params);
+  await pool.query(`UPDATE users SET ${fields.join(", ")} WHERE id=? AND deleted_at IS NULL`, params);
 
   broadcast("user:updated", { userId: Number(id) });
   res.json({ ok: true });
@@ -55,10 +56,10 @@ async function setAdmin(req, res) {
   if (!role) return res.status(400).json({ message: "role required" });
 
   // تقدر تحتفظ بقواعد إضافية هنا لو عايز تمنع تنزيل صلاحيات آخر أدمن مثلًا
-  await pool.query(`UPDATE users SET role=? WHERE id=?`, [role, id]);
+  await pool.query(`UPDATE users SET role=? WHERE id=? AND deleted_at IS NULL`, [role, id]);
   if (role === "user") {
     const [admins] = await pool.query(
-      `SELECT COUNT(*) AS c FROM users WHERE role='admin'`
+      `SELECT COUNT(*) AS c FROM users WHERE role='admin' AND deleted_at IS NULL`
     );
     if (admins[0].c <= 1) {
       return res.status(403).json({ message: "Cannot demote the last admin" });
@@ -68,11 +69,12 @@ async function setAdmin(req, res) {
   res.json({ ok: true });
 }
 
+
 async function deleteUser(req, res) {
   const { id } = req.params;
 
   // 1) هات بيانات المستخدم المستهدف
-  const [rows] = await pool.query(`SELECT id, role FROM users WHERE id=?`, [
+  const [rows] = await pool.query(`SELECT id, name, email, role, deleted_at FROM users WHERE id=?`, [
     id,
   ]);
   if (rows.length === 0)
@@ -85,7 +87,27 @@ async function deleteUser(req, res) {
       .json({ message: "Deleting admin accounts is not allowed" });
   }
 
-  await pool.query(`DELETE FROM users WHERE id=?`, [id]);
+  // 3) لو متحذف بالفعل (soft delete) — no-op
+  if (rows[0].deleted_at) {
+    return res.json({ ok: true });
+  }
+
+  const before = {
+    id: rows[0].id,
+    name: rows[0].name,
+    email: rows[0].email,
+    role: rows[0].role,
+  };
+
+  await pool.query(`UPDATE users SET deleted_at = NOW() WHERE id=? AND deleted_at IS NULL`, [id]);
+  await audit(null, req, {
+    action: "delete",
+    entity_type: "user",
+    entity_id: String(id),
+    before,
+    after: null,
+  });
+
   broadcast("user:deleted", { userId: Number(id) });
   res.json({ ok: true });
 }

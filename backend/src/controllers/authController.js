@@ -24,10 +24,27 @@ async function signup(req, res) {
   }
 
   // فحص البريد
-  const [exists] = await pool.query(`SELECT id FROM users WHERE email=?`, [
+  const [exists] = await pool.query(`SELECT id, deleted_at FROM users WHERE email=?`, [
     email,
   ]);
+
   if (exists.length > 0) {
+    // لو الحساب كان معمول Soft Delete قبل كده، نرجّعه بدل ما نفشل بسبب unique email
+    if (exists[0].deleted_at) {
+      const password_hash_restore = await hashPassword(password);
+      await pool.query(
+        `UPDATE users SET name=?, password_hash=?, role='user', deleted_at=NULL WHERE id=?`,
+        [name, password_hash_restore, exists[0].id]
+      );
+      const user = {
+        id: exists[0].id,
+        name,
+        email,
+        role: 'user',
+      };
+      const token = signToken(user);
+      return res.json({ token, user });
+    }
     return res.status(409).json({ message: "Email already exists" });
   }
 
@@ -57,7 +74,7 @@ async function login(req, res) {
     return res.status(400).json({ message: "email, password required" });
 
   const [rows] = await pool.query(
-    `SELECT id, name, email, password_hash, role FROM users WHERE email=?`,
+    `SELECT id, name, email, password_hash, role FROM users WHERE email=? AND deleted_at IS NULL`,
     [email]
   );
   if (rows.length === 0)
@@ -82,7 +99,7 @@ async function login(req, res) {
 async function me(req, res) {
   const { id } = req.user;
   const [rows] = await pool.query(
-    `SELECT id, name, email, role FROM users WHERE id=?`,
+    `SELECT id, name, email, role FROM users WHERE id=? AND deleted_at IS NULL`,
     [id]
   );
   if (rows.length === 0) return res.status(404).json({ message: "Not found" });
