@@ -111,21 +111,6 @@ async function selectAgenda(conn) {
   }));
 }
 
-
-
-function mapAgendaRow(r) {
-  if (!r) return null;
-  return {
-    id: r.id,
-    day: toISODateOnly(r.day),
-    start: r.start_time,
-    end: r.end_time,
-    type: r.type || "normal",
-    title: r.title || "",
-    details: r.details || "",
-  };
-}
-
 async function withTx(fn) {
   const conn = await pool.getConnection();
   try {
@@ -150,7 +135,7 @@ async function selectAgendaItemById(id, conn = pool) {
   const [rows] = await conn.query(
     `SELECT id, day, start_time, end_time, type, title, details
      FROM agenda_items
-     WHERE id = ? AND deleted_at IS NULL
+     WHERE id = ?
      LIMIT 1`,
     [id]
   );
@@ -197,7 +182,7 @@ async function createAgendaItem(req, res, next) {
 
       await audit(conn, req, { action: "create", entity_type: "agenda", entity_id: id, before: null, after: { id, day, start, end, type, title, details } });
 
-      const meta = await bumpVersion(conn);
+    const meta = await bumpVersion(conn);
       const agenda = await selectAgenda(conn);
       return { meta, agenda };
     });

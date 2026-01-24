@@ -226,17 +226,9 @@ async function ensureNormalizedPlannerTables() {
       details TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      deleted_at DATETIME NULL,
       INDEX idx_agenda_day (day)
     ) ENGINE=InnoDB;
   `);
-
-  // Soft delete support for agenda_items
-  const aCols = await getColumnSet("agenda_items");
-  if (!aCols.has("deleted_at")) {
-    await tryQuery(`ALTER TABLE agenda_items ADD COLUMN deleted_at DATETIME NULL`);
-  }
-  await tryQuery(`CREATE INDEX idx_agenda_deleted_at ON agenda_items(deleted_at)`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS drivers (

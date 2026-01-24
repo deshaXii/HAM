@@ -9,8 +9,6 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-  // IMPORTANT: avoid timezone shifts for DATE columns (agenda/day/week_start)
-  dateStrings: ["DATE"],
 });
 
 module.exports = { pool };
