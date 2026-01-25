@@ -21,15 +21,19 @@ const FinanceSummary = ({ state }) => {
 
       let prevDropoff = tractor.currentLocation;
       tractorJobs.forEach((job) => {
-        const emptyKm = state.distanceKm[prevDropoff]?.[job.pickup] || 0;
+        const pickup = job.pickup || job.startPoint || job.start_point || "";
+        const dropoff = job.dropoff || job.endPoint || job.end_point || "";
+        const emptyKm = state.distanceKm[prevDropoff]?.[pickup] || 0;
         emptyKmPerJob[job.id] = emptyKm;
-        prevDropoff = job.dropoff;
+        prevDropoff = dropoff || job.dropoff;
       });
     });
 
     // Calculate job revenues and costs
     state.jobs.forEach((job) => {
-      const loadedKm = state.distanceKm[job.pickup]?.[job.dropoff] || 0;
+      const pickup = job.pickup || job.startPoint || job.start_point || "";
+      const dropoff = job.dropoff || job.endPoint || job.end_point || "";
+      const loadedKm = state.distanceKm[pickup]?.[dropoff] || 0;
 
       // Revenue
       if (job.pricing.type === "fixed") {

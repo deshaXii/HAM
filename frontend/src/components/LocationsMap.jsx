@@ -1,81 +1,46 @@
 // src/components/LocationsMap.jsx
-import React, { useEffect, useMemo, useState, useCallback } from "react";
-import { GoogleMap, Marker, useLoadScript } from "@react-google-maps/api";
-import { MapPin, Save, Trash2, Loader2 } from "lucide-react";
-import { apiGetState, apiSaveState, apiDeleteLocation } from "../lib/api";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Save, Plus, Loader2 } from "lucide-react";
+import { apiGetState, apiSaveState } from "../lib/api";
 import { useAuth } from "../contexts/AuthContext";
 
-// مركز هولندا
-const NL_CENTER = { lat: 52.1326, lng: 5.2913 };
-const MAP_ZOOM = 7;
-const MAP_CONTAINER_STYLE = { width: "100%", height: "100%" };
-
-// مسافة هفرسين
-function haversineKm(a, b) {
-  if (!a || !b) return 0;
-  const R = 6371;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const lat1 = (a.lat * Math.PI) / 180;
-  const lat2 = (b.lat * Math.PI) / 180;
-  const sin1 = Math.sin(dLat / 2);
-  const sin2 = Math.sin(dLng / 2);
-  const c =
-    2 *
-    Math.asin(
-      Math.sqrt(sin1 * sin1 + Math.cos(lat1) * Math.cos(lat2) * sin2 * sin2)
-    );
-  return Math.round(R * c);
-}
-
-function normalizeLocations(raw) {
-  if (!Array.isArray(raw) || raw.length === 0) {
-    return [
-      {
-        id: "loc-depot-hoofddorp",
-        name: "Depot-Hoofddorp",
-        lat: 52.303,
-        lng: 4.6901,
-      },
-      {
-        id: "loc-ah-zaandam",
-        name: "AH-Zaandam",
-        lat: 52.438,
-        lng: 4.826,
-      },
-    ];
-  }
-  return raw.map((item, idx) => {
+function toLocationObjects(list) {
+  if (!Array.isArray(list)) return [];
+  return list.map((item, idx) => {
     if (typeof item === "string") {
       return {
         id: `loc-${idx}-${item.replace(/\s+/g, "-").toLowerCase()}`,
         name: item,
-        lat: NL_CENTER.lat,
-        lng: NL_CENTER.lng,
       };
     }
     return {
       id: item.id || `loc-${idx}-${(item.name || "loc").toLowerCase()}`,
       name: item.name || `Location ${idx + 1}`,
-      lat: typeof item.lat === "number" ? item.lat : NL_CENTER.lat,
-      lng: typeof item.lng === "number" ? item.lng : NL_CENTER.lng,
     };
   });
 }
 
-function buildDistanceMatrixFromLocations(locations) {
-  const dist = {};
-  locations.forEach((from) => {
-    dist[from.name] = dist[from.name] || {};
-    locations.forEach((to) => {
-      if (from.id === to.id) return;
-      const km = haversineKm(
-        { lat: from.lat, lng: from.lng },
-        { lat: to.lat, lng: to.lng }
-      );
-      dist[from.name][to.name] = km;
-    });
-  });
+function ensureMatrixSymmetry(distanceKm, names) {
+  const dist = typeof distanceKm === "object" && distanceKm ? { ...distanceKm } : {};
+  // ensure rows
+  for (const from of names) {
+    dist[from] = typeof dist[from] === "object" && dist[from] ? { ...dist[from] } : {};
+  }
+  // ensure cols + symmetry
+  for (const from of names) {
+    for (const to of names) {
+      if (from === to) continue;
+      const a = dist[from]?.[to];
+      const b = dist[to]?.[from];
+      let v = 0;
+      if (typeof a === "number") v = a;
+      else if (typeof b === "number") v = b;
+      else if (a !== undefined && a !== null && a !== "") v = Number(a) || 0;
+      else if (b !== undefined && b !== null && b !== "") v = Number(b) || 0;
+      dist[from][to] = v;
+      dist[to][from] = v;
+    }
+  }
   return dist;
 }
 
@@ -83,292 +48,232 @@ export default function LocationsMap() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
 
-  const [loading, setLoading] = useState(true);
   const [state, setState] = useState(null);
-  const [clickedPos, setClickedPos] = useState(null);
-  const [newName, setNewName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [newCity, setNewCity] = useState("");
 
-  // حمّل جوجل
-  const { isLoaded, loadError } = useLoadScript({
-    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY,
-  });
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const apiState = await apiGetState();
-        const normalized = {
-          ...apiState,
-          locations: normalizeLocations(apiState.locations),
-        };
-        setState(normalized);
-      } catch (e) {
-        console.error("failed to load locations page", e);
-        setState({
-          locations: normalizeLocations(null),
-          distanceKm: {},
-        });
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  const onMapClick = useCallback(
-    (e) => {
-      if (!isAdmin) return;
-      const lat = e.latLng.lat();
-      const lng = e.latLng.lng();
-      setClickedPos({ lat, lng });
-      setNewName("");
-    },
-    [isAdmin]
-  );
-
-  const addLocation = () => {
-    if (!state || !clickedPos) return;
-    const name = newName.trim() || `Location ${state.locations.length + 1}`;
-    const newLoc = {
-      id: `loc-${crypto.randomUUID()}`,
-      name,
-      lat: clickedPos.lat,
-      lng: clickedPos.lng,
-    };
-    const newLocations = [...state.locations, newLoc];
-    const newMatrix = buildDistanceMatrixFromLocations(newLocations);
-    setState({
-      ...state,
-      locations: newLocations,
-      distanceKm: newMatrix,
-    });
-    setClickedPos(null);
-    setNewName("");
-  };
-
-  const removeLocation = (locId) => {
-    if (!state) return;
-    (async () => {
-      try {
-        await apiDeleteLocation(locId);
-        const keep = state.locations.filter((l) => l.id !== locId);
-        const newMatrix = buildDistanceMatrixFromLocations(keep);
-        setState({
-          ...state,
-          locations: keep,
-          distanceKm: newMatrix,
-        });
-      } catch (e) {
-        console.error(e);
-        alert("Delete failed. Nothing was removed from the server.");
-      }
-    })();
-  };
-
-  const saveAll = async () => {
-    if (!state) return;
+  const load = useCallback(async () => {
+    setLoading(true);
     try {
-      await apiSaveState({
-        ...state,
-        locations: state.locations,
-        distanceKm: state.distanceKm,
-      });
-      alert("Locations & distances saved.");
+      const s = await apiGetState();
+      const locs = toLocationObjects(s?.locations || []);
+      const names = locs.map((l) => l.name);
+      const distanceKm = ensureMatrixSymmetry(s?.distanceKm || {}, names);
+      setState({ ...(s || {}), locations: locs, distanceKm });
     } catch (e) {
       console.error(e);
-      alert("Failed to save.");
+      setState({
+        locations: [],
+        distanceKm: {},
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const locationNames = useMemo(() => {
+    const locs = toLocationObjects(state?.locations || []);
+    return locs.map((l) => l.name);
+  }, [state?.locations]);
+
+  const distanceKm = useMemo(() => {
+    return ensureMatrixSymmetry(state?.distanceKm || {}, locationNames);
+  }, [state?.distanceKm, locationNames]);
+
+  const updateDistance = (from, to, value) => {
+    if (!isAdmin) return;
+    const km = Math.max(0, Number(value) || 0);
+    setState((prev) => {
+      const next = { ...(prev || {}) };
+      const locs = toLocationObjects(next.locations || []);
+      const names = locs.map((l) => l.name);
+      const dist = ensureMatrixSymmetry(next.distanceKm || {}, names);
+      dist[from] = dist[from] || {};
+      dist[to] = dist[to] || {};
+      dist[from][to] = km;
+      dist[to][from] = km;
+      next.locations = locs;
+      next.distanceKm = dist;
+      return next;
+    });
+  };
+
+  const addCity = () => {
+    if (!isAdmin) return;
+    const name = String(newCity || "").trim();
+    if (!name) return;
+
+    setState((prev) => {
+      const next = { ...(prev || {}) };
+      const locs = toLocationObjects(next.locations || []);
+      if (locs.some((l) => l.name.toLowerCase() === name.toLowerCase())) return prev;
+
+      const newLoc = { id: `loc-${crypto.randomUUID()}`, name };
+      const updatedLocations = [...locs, newLoc];
+      const names = updatedLocations.map((l) => l.name);
+      const dist = ensureMatrixSymmetry(next.distanceKm || {}, names);
+      // initialize new row/col to 0
+      dist[name] = dist[name] || {};
+      for (const other of names) {
+        if (other === name) continue;
+        dist[name][other] = dist[name][other] ?? 0;
+        dist[other] = dist[other] || {};
+        dist[other][name] = dist[other][name] ?? 0;
+      }
+      next.locations = updatedLocations;
+      next.distanceKm = dist;
+      return next;
+    });
+
+    setNewCity("");
+  };
+
+  const handleSave = async () => {
+    if (!isAdmin || !state) return;
+    setSaving(true);
+    try {
+      // Ensure consistent matrix before saving
+      const locs = toLocationObjects(state.locations || []);
+      const names = locs.map((l) => l.name);
+      const dist = ensureMatrixSymmetry(state.distanceKm || {}, names);
+
+      const payload = {
+        ...state,
+        locations: locs,
+        distanceKm: dist,
+      };
+
+      const saved = await apiSaveState(payload);
+      // reload to align with server meta/version
+      const locs2 = toLocationObjects(saved?.locations || locs);
+      const names2 = locs2.map((l) => l.name);
+      const dist2 = ensureMatrixSymmetry(saved?.distanceKm || dist, names2);
+      setState({ ...(saved || payload), locations: locs2, distanceKm: dist2 });
+
+      alert("Distance matrix saved ✅");
+    } catch (e) {
+      console.error(e);
+      alert("Failed to save distance matrix ❌");
+    } finally {
+      setSaving(false);
     }
   };
 
-  if (loading) {
+  if (loading || !state) {
     return (
-      <div className="p-6 flex items-center gap-2 text-gray-600">
-        <Loader2 className="animate-spin" size={16} /> Loading locations...
+      <div className="min-h-screen bg-gray-50 p-6 text-gray-600">
+        <div className="max-w-[1800px] mx-auto flex items-center gap-2">
+          <Loader2 className="animate-spin" size={18} />
+          Loading distance matrix...
+        </div>
       </div>
     );
-  }
-  if (loadError) {
-    return (
-      <div className="p-6 text-red-600 text-sm">
-        Google Maps failed to load. Check your API key.
-      </div>
-    );
-  }
-  if (!isLoaded) {
-    return <div className="p-6 text-gray-500 text-sm">Loading map...</div>;
   }
 
   return (
-    <div className="p-4 md:p-6 flex flex-col gap-4 min-h-screen bg-gray-50">
-      {/* header */}
-      <div className="flex items-center justify-between bg-white rounded-xl border border-gray-200 shadow-sm px-4 py-3">
-        <div>
-          <h2 className="text-base font-semibold text-gray-900">
-            Locations & Map (Google Maps)
-          </h2>
-          <p className="text-xs text-gray-500">
-            Click on the map to add a location. Distances are computed
-            automatically between all locations.
-          </p>
-        </div>
-        {isAdmin ? (
-          <button
-            onClick={saveAll}
-            className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg"
-          >
-            <Save size={14} />
-            Save
-          </button>
-        ) : (
-          <span className="text-xs text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
-            Read only
-          </span>
-        )}
-      </div>
-
-      <div className="flex flex-col lg:flex-row gap-4">
-        {/* map */}
-        <div className="lg:w-1/2 bg-white border border-gray-200 rounded-xl shadow-sm min-h-[480px] overflow-hidden">
-          <GoogleMap
-            zoom={MAP_ZOOM}
-            center={NL_CENTER}
-            mapContainerStyle={MAP_CONTAINER_STYLE}
-            onClick={onMapClick}
-          >
-            {/* existing markers */}
-            {state.locations.map((loc) => (
-              <Marker
-                key={loc.id}
-                position={{ lat: loc.lat, lng: loc.lng }}
-                label={loc.name.substring(0, 4)}
-              />
-            ))}
-
-            {/* clicked point (pending) */}
-            {clickedPos && (
-              <Marker
-                position={clickedPos}
-                icon={{
-                  path: window.google.maps.SymbolPath.CIRCLE,
-                  scale: 6,
-                  fillColor: "#2563eb",
-                  fillOpacity: 1,
-                  strokeColor: "#fff",
-                  strokeWeight: 2,
-                }}
-              />
-            )}
-          </GoogleMap>
-        </div>
-
-        {/* right side */}
-        <div className="lg:w-1/2 flex flex-col gap-4">
-          {clickedPos && isAdmin && (
-            <div className="bg-white border border-blue-200 rounded-lg p-3 shadow-sm">
-              <h3 className="text-sm font-semibold text-gray-800 mb-2 flex items-center gap-1">
-                <MapPin size={14} className="text-blue-500" />
-                Add location
-              </h3>
-              <div className="grid grid-cols-2 gap-2 mb-2 text-xs text-gray-500">
-                <div>Lat: {clickedPos.lat.toFixed(6)}</div>
-                <div>Lng: {clickedPos.lng.toFixed(6)}</div>
-              </div>
-              <input
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                placeholder="Location name (e.g. Rotterdam DC)"
-                className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <button
-                onClick={addLocation}
-                className="bg-blue-600 hover:bg-blue-700 text-white text-sm px-3 py-1.5 rounded"
-              >
-                Add
-              </button>
-            </div>
-          )}
-
-          <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
-            <div className="px-4 py-3 border-b flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-gray-800">
-                Saved Locations ({state.locations.length})
-              </h3>
-            </div>
-            <div className="max-h-[320px] overflow-y-auto divide-y">
-              {state.locations.map((loc) => (
-                <div
-                  key={loc.id}
-                  className="px-4 py-3 flex items-center justify-between gap-2"
-                >
-                  <div>
-                    <div className="text-sm font-medium text-gray-900">
-                      {loc.name}
-                    </div>
-                    <div className="text-[11px] text-gray-500">
-                      {loc.lat.toFixed(5)}, {loc.lng.toFixed(5)}
-                    </div>
-                  </div>
-                  {isAdmin && (
-                    <button
-                      onClick={() => removeLocation(loc.id)}
-                      className="text-red-500 hover:text-red-700 p-1"
-                      title="Remove"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  )}
-                </div>
-              ))}
-              {state.locations.length === 0 && (
-                <div className="px-4 py-6 text-center text-xs text-gray-400">
-                  No locations yet. Click on the map to add.
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* quick view of matrix */}
-          <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-3">
-            <h3 className="text-xs font-semibold text-gray-700 mb-2">
-              Distance Matrix (km)
-            </h3>
-            <div className="overflow-x-auto">
-              <table className="min-w-full border text-[10px]">
-                <thead>
-                  <tr>
-                    <th className="border px-1 py-1 bg-gray-50">From \ To</th>
-                    {state.locations.map((loc) => (
-                      <th key={loc.id} className="border px-1 py-1 bg-gray-50">
-                        {loc.name}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {state.locations.map((from) => (
-                    <tr key={from.id}>
-                      <td className="border px-1 py-1 bg-gray-50">
-                        {from.name}
-                      </td>
-                      {state.locations.map((to) => (
-                        <td
-                          key={to.id}
-                          className="border px-1 py-1 text-center"
-                        >
-                          {from.id === to.id
-                            ? "-"
-                            : state.distanceKm?.[from.name]?.[to.name] ?? ""}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="text-[10px] text-gray-400 mt-2">
-              هذه القيم هي اللي هيشوفها الـ JobModal في الـstartPoint /
-              endPoint.
+    <div className="min-h-screen bg-gray-50 p-6">
+      <div className="max-w-[1800px] mx-auto space-y-4">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-gray-900">Distance Matrix (km)</h1>
+            <p className="text-sm text-gray-600 mt-1">
+              Add cities and enter distances manually. This matrix is used in job routing (Start / End points).
             </p>
           </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2">
+              <input
+                value={newCity}
+                onChange={(e) => setNewCity(e.target.value)}
+                placeholder="Add city..."
+                className="border rounded-lg px-3 py-2 text-sm w-56"
+                disabled={!isAdmin}
+              />
+              <button
+                onClick={addCity}
+                disabled={!isAdmin || !newCity.trim()}
+                className="inline-flex items-center gap-2 bg-gray-900 text-white px-3 py-2 rounded-lg text-sm disabled:opacity-50"
+              >
+                <Plus size={16} /> Add
+              </button>
+            </div>
+
+            <button
+              onClick={handleSave}
+              disabled={!isAdmin || saving}
+              className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm disabled:opacity-50"
+            >
+              {saving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
+              Save
+            </button>
+          </div>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="overflow-auto">
+            <table className="min-w-[900px] w-full text-xs md:text-sm">
+              <thead className="bg-gray-50 sticky top-0 z-10">
+                <tr>
+                  <th className="text-left px-3 py-2 border-b border-gray-200 sticky left-0 bg-gray-50 z-20">From \\ To</th>
+                  {locationNames.map((to) => (
+                    <th key={to} className="px-3 py-2 border-b border-gray-200 text-left whitespace-nowrap">
+                      {to}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {locationNames.length === 0 ? (
+                  <tr>
+                    <td className="px-3 py-6 text-gray-500" colSpan={locationNames.length + 1}>
+                      No cities yet. Add your first city above.
+                    </td>
+                  </tr>
+                ) : (
+                  locationNames.map((from) => (
+                    <tr key={from} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 font-medium text-gray-800 sticky left-0 bg-white z-10 border-r border-gray-100 whitespace-nowrap">
+                        {from}
+                      </td>
+                      {locationNames.map((to) => {
+                        if (from === to) {
+                          return (
+                            <td key={`${from}-${to}`} className="px-3 py-2 text-gray-300">
+                              —
+                            </td>
+                          );
+                        }
+                        const v = distanceKm?.[from]?.[to] ?? 0;
+                        return (
+                          <td key={`${from}-${to}`} className="px-2 py-2">
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={v}
+                              disabled={!isAdmin}
+                              onChange={(e) => updateDistance(from, to, e.target.value)}
+                              className="w-24 border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="text-xs text-gray-500">
+          Tip: Distances are symmetric (A→B = B→A). Editing one cell updates both.
         </div>
       </div>
     </div>

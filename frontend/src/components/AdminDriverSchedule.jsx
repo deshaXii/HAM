@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useAuth } from "../contexts/AuthContext";
 
 const DAYS = [
@@ -92,51 +92,6 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
   );
 
   const [local, setLocal] = useState(normalized);
-
-  // Debounced push-up so the page-level Save/auto-save owns persistence.
-  const didMountRef = useRef(false);
-  const pushTimerRef = useRef(null);
-
-  function normalizeOut(list) {
-    return (Array.isArray(list) ? list : []).map((d) => ({
-      id: d.id,
-      name: d.name,
-      code: d.code,
-      photoUrl: d.photoUrl,
-      canNight: !!d.canNight,
-      sleepsInCab: !!d.sleepsInCab,
-      doubleMannedEligible: !!d.doubleMannedEligible,
-      weekAvailability: Array.isArray(d.weekAvailability)
-        ? d.weekAvailability.slice().sort()
-        : [0, 1, 2, 3, 4, 5, 6],
-      leaves: Array.isArray(d.leaves) ? d.leaves.slice().sort() : [],
-    }));
-  }
-
-  useEffect(() => {
-    // keep local in sync when drivers prop changes (e.g., reload)
-    setLocal(normalized);
-  }, [normalized]);
-
-  useEffect(() => {
-    if (!isAdmin) return;
-    if (!onSaveDrivers) return;
-
-    // Skip the first push on mount so we don't save immediately on load.
-    if (!didMountRef.current) {
-      didMountRef.current = true;
-      return;
-    }
-
-    if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
-    pushTimerRef.current = setTimeout(() => {
-      onSaveDrivers(normalizeOut(local));
-    }, 450);
-
-    return () => {
-      if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
-    };
-  }, [local, isAdmin, onSaveDrivers]);
   const [rangeFrom, setRangeFrom] = useState("");
   const [rangeTo, setRangeTo] = useState("");
 
@@ -202,11 +157,35 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers }) {
     );
   }
 
+  function saveAll() {
+    const normalizedOut = local.map((d) => ({
+      id: d.id,
+      name: d.name,
+      code: d.code,
+      photoUrl: d.photoUrl,
+      canNight: !!d.canNight,
+      sleepsInCab: !!d.sleepsInCab,
+      doubleMannedEligible: !!d.doubleMannedEligible,
+      weekAvailability: Array.isArray(d.weekAvailability)
+        ? d.weekAvailability.slice().sort()
+        : [0, 1, 2, 3, 4, 5, 6],
+      leaves: Array.isArray(d.leaves) ? d.leaves.slice().sort() : [],
+    }));
+    onSaveDrivers && onSaveDrivers(normalizedOut);
+  }
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-900">Driver Availability / Schedule</h2>
-        <div className="text-xs text-gray-500">Edits auto-save via the page Save controls</div>
+    <div className="max-w-4xl mx-auto p-4 space-y-6">
+      <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-4 flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-gray-900">
+          Driver Availability / Schedule
+        </h2>
+        <button
+          onClick={saveAll}
+          className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg shadow"
+        >
+          Save
+        </button>
       </div>
 
       {local.length === 0 && (

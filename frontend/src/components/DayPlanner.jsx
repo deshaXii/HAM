@@ -137,6 +137,10 @@ function normalizeStateForBackend(state) {
   const normJobs = (state.jobs || []).map((job) => {
     const j = { ...job };
 
+    // Route fields: support startPoint/endPoint legacy
+    if (!j.pickup && j.startPoint) j.pickup = j.startPoint;
+    if (!j.dropoff && j.endPoint) j.dropoff = j.endPoint;
+
     j.pickup = toBackendLocation(j.pickup);
     j.dropoff = toBackendLocation(j.dropoff);
 

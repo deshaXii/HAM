@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Plus, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
-import { apiGetState, apiSaveState, apiDeleteAgendaItem } from "../lib/api";
+import { apiGetState, apiSaveState } from "../lib/api";
 
 /* ================= helpers ================= */
 
@@ -629,16 +629,8 @@ export default function Agenda() {
   };
 
   const deleteEvent = (id) => {
-    (async () => {
-      try {
-        await apiDeleteAgendaItem(id);
-        const next = events.filter((e) => e.id !== id);
-        persistAgenda(next);
-      } catch (e) {
-        console.error(e);
-        alert("Delete failed. Nothing was removed from the server.");
-      }
-    })();
+    const next = events.filter((e) => e.id !== id);
+    persistAgenda(next);
   };
 
   if (loading) {
