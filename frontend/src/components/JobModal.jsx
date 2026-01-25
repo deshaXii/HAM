@@ -28,9 +28,6 @@ export default function JobModal({
 }) {
   const [form, setForm] = useState(() => ({
     ...job,
-    // route fields (support old startPoint/endPoint + new pickup/dropoff)
-    pickup: job.pickup ?? job.startPoint ?? "",
-    dropoff: job.dropoff ?? job.endPoint ?? "",
     driverIds: Array.isArray(job.driverIds) ? job.driverIds : [],
     revenueTrip: job.revenueTrip ?? "",
     costDriver: job.costDriver ?? "",
@@ -95,14 +92,12 @@ export default function JobModal({
     onSave(payload);
   };
 
-  const currentStart = (form.pickup || form.startPoint) || "";
-
   const startDisabled =
     !isAdmin ||
     (!form.allowStartOverride &&
       lastTractorEnd &&
-      currentStart &&
-      currentStart !== lastTractorEnd);
+      form.startPoint &&
+      form.startPoint !== lastTractorEnd);
 
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
@@ -284,12 +279,8 @@ export default function JobModal({
                 </label>
                 <select
                   className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={(form.pickup || form.startPoint) || ""}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    set("pickup", v);
-                    set("startPoint", v);
-                  }}
+                  value={form.startPoint || ""}
+                  onChange={(e) => set("startPoint", e.target.value)}
                   disabled={startDisabled}
                 >
                   <option value="">Select...</option>
@@ -322,8 +313,8 @@ export default function JobModal({
                 </label>
                 {form.allowStartOverride &&
                   lastTractorEnd &&
-                  currentStart &&
-                  currentStart !== lastTractorEnd && (
+                  form.startPoint &&
+                  form.startPoint !== lastTractorEnd && (
                     <div className="flex items-center gap-1 text-xs text-red-600 mt-1">
                       <AlertTriangle size={14} /> This job will start away from
                       current tractor position.
@@ -337,12 +328,8 @@ export default function JobModal({
                 </label>
                 <select
                   className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={(form.dropoff || form.endPoint) || ""}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    set("dropoff", v);
-                    set("endPoint", v);
-                  }}
+                  value={form.endPoint || ""}
+                  onChange={(e) => set("endPoint", e.target.value)}
                   disabled={!isAdmin}
                 >
                   <option value="">Select...</option>

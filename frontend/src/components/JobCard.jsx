@@ -132,6 +132,7 @@ export function getJobBgClass(job, warnings) {
 
 const JobCard = ({
   job,
+  segment,
   resources,
   onUpdate,
   onDelete,
@@ -287,6 +288,22 @@ const JobCard = ({
   const statusKey = computeJobStatus(job);
   const statusColor = STATUS_COLORS[statusKey] || STATUS_COLORS.incomplete;
 
+
+  const displayTimeRange = (() => {
+    if (!segment) return null;
+    const s = segment.displayStart || job.start || "--:--";
+    const e = segment.displayEnd || "--:--";
+    return `${s} → ${e}`;
+  })();
+
+  const displaySegmentHours = (() => {
+    if (!segment) return null;
+    const mins = Math.max(0, (segment.endMinutes || 0) - (segment.startMinutes || 0));
+    const h = mins / 60;
+    const s = String(h.toFixed(1)).replace(/\.0$/, "");
+    return `${s}h`;
+  })();
+
   const pickupLabel = job.startPoint || job.pickup || "Start?";
   const dropoffLabel = job.endPoint || job.dropoff || "End?";
 
@@ -311,14 +328,21 @@ const JobCard = ({
           </h4>
           <div className="mt-[2px] flex items-center gap-1 text-[11px] text-gray-600">
             <Clock size={12} />
-            <span>{job.start || "--:--"}</span>
+            <span>{displayTimeRange || (job.start || "--:--")}</span>
             {job.durationHours ? (
               <>
                 <span>•</span>
-                <span>{job.durationHours}h</span>
+                <span>{displaySegmentHours || `${job.durationHours}h`}</span>
               </>
             ) : null}
           </div>
+          {segment?.isMultiDay ? (
+            <div className="mt-1 text-[10px] text-purple-700 pl-3">
+              {segment.startsPrevDay ? `↩ Started ${segment.originalStartISO} ${segment.originalStartTime}` : null}
+              {segment.startsPrevDay && segment.endsNextDay ? " • " : null}
+              {segment.endsNextDay ? `↪ Ends ${segment.originalEndISO} ${segment.originalEndTime}` : null}
+            </div>
+          ) : null}
         </div>
 
         {isAdmin && (

@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { Plus } from "lucide-react";
 import JobCard, { getJobWarnings } from "./JobCard";
+import { getJobSegmentForDay, slotForMinutes } from "../lib/jobTime";
 
 /**
  * Drop zone لبلوك وقت محدد في اليوم.
@@ -63,9 +64,16 @@ export default function DayTimelineView({
   const MIN_TIMELINE_HEIGHT = 960;
 
   // 1) فلترة الشغلانات على اليوم + فلاتر resources
-  let todaysJobs = (state.jobs || []).filter((job) => job.date === date);
+  // Include jobs that overlap this day (overnight / multi-day)
+  let todaysJobs = (state.jobs || [])
+    .map((job) => {
+      const seg = getJobSegmentForDay(job, date);
+      if (!seg) return null;
+      return { job, seg };
+    })
+    .filter(Boolean);
 
-  todaysJobs = todaysJobs.filter((job) => {
+  todaysJobs = todaysJobs.filter(({ job }) => {
     if (filterTractor && job.tractorId !== filterTractor) return false;
     if (filterTrailer && job.trailerId !== filterTrailer) return false;
     if (filterDriver && !(job.driverIds || []).includes(filterDriver))
@@ -73,26 +81,24 @@ export default function DayTimelineView({
     return true;
   });
 
-  const isUnscheduled = (job) =>
+  const isUnscheduled = ({ job }) =>
     !job.start || !job.durationHours || job.durationHours <= 0;
 
-  const hasWarnings = (job) => getJobWarnings(job, state).length > 0;
+  const hasWarnings = ({ job }) => getJobWarnings(job, state).length > 0;
 
   // 2) Quick filters
   let visibleJobs = todaysJobs;
 
   if (viewFilter === "conflicts") {
-    visibleJobs = visibleJobs.filter((job) => hasWarnings(job));
+    visibleJobs = visibleJobs.filter((x) => hasWarnings(x));
   } else if (viewFilter === "unassigned") {
-    visibleJobs = visibleJobs.filter(
-      (job) => isUnscheduled(job) || hasWarnings(job)
-    );
+    visibleJobs = visibleJobs.filter((x) => isUnscheduled(x) || hasWarnings(x));
   } else if (viewFilter === "night") {
-    visibleJobs = visibleJobs.filter((job) => job.slot === "night");
+    visibleJobs = visibleJobs.filter((x) => slotForMinutes(x.seg.startMinutes) === "night");
   }
 
   const unscheduledJobs = visibleJobs.filter((job) => isUnscheduled(job));
-  const scheduledJobs = visibleJobs.filter((job) => !isUnscheduled(job));
+  const scheduledJobs = visibleJobs.filter((x) => !isUnscheduled(x));
 
   const humanDateLabel = new Date(date).toLocaleDateString("en-US", {
     weekday: "long",
@@ -104,16 +110,10 @@ export default function DayTimelineView({
   // 3) meta للي عندهم وقت بس
   const jobsWithMeta = useMemo(() => {
     const items = scheduledJobs
-      .map((job) => {
-        const startMinutes = Math.min(
-          parseTimeToMinutes(job.start),
-          TOTAL_MINUTES
-        );
-        let durationMinutes = Number(job.durationHours || 0) * 60;
-        if (!durationMinutes || durationMinutes <= 0) durationMinutes = 60;
-
-        let endMinutes = startMinutes + durationMinutes;
-        if (endMinutes > TOTAL_MINUTES) endMinutes = TOTAL_MINUTES;
+      .map(({ job, seg }) => {
+                const startMinutes = Math.min(seg.startMinutes || 0, TOTAL_MINUTES);
+                let endMinutes = Math.min(seg.endMinutes || startMinutes + 60, TOTAL_MINUTES);
+        let durationMinutes = Math.max(1, endMinutes - startMinutes);
 
         let widthPct = ((endMinutes - startMinutes) / TOTAL_MINUTES) * 100;
         if (widthPct < MIN_WIDTH_PCT) widthPct = MIN_WIDTH_PCT;
@@ -122,6 +122,7 @@ export default function DayTimelineView({
 
         return {
           job,
+          seg,
           startMinutes,
           endMinutes,
           leftPct,
@@ -210,6 +211,7 @@ export default function DayTimelineView({
               >
                 <JobCard
                   job={job}
+                  segment={seg}
                   resources={state}
                   isAdmin={isAdmin}
                   onOpen={() => onOpenJob(job.id)}

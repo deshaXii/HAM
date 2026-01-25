@@ -6,7 +6,7 @@ import { TRACTOR_TAXONOMY } from "../constants/tractorTaxonomy";
 import { Plus, Trash2, Download, Upload, X, ImageIcon } from "lucide-react";
 import AdminExtras from "./AdminExtras";
 import { useAuth } from "../contexts/AuthContext";
-import { apiGetState, apiSaveState, apiUploadDriverPhoto } from "../lib/api";
+import { apiGetState, apiSaveState, apiUploadDriverPhoto, apiDeleteTractor, apiDeleteTrailer } from "../lib/api";
 import * as XLSX from "xlsx";
 
 // ========== DEFAULT STATE ==========
@@ -144,16 +144,6 @@ function parseJobSlot(val) {
 }
 
 function exportStateToExcel(anyState) {
-  const driversSheetData = (anyState.drivers || []).map((d) => ({
-    id: d.id,
-    name: d.name,
-    code: d.code || "",
-    canNight: d.canNight ? 1 : 0,
-    sleepsInCab: d.sleepsInCab ? 1 : 0,
-    doubleMannedEligible: d.doubleMannedEligible ? 1 : 0,
-    rating: Number.isFinite(Number(d.rating)) ? Number(d.rating) : "",
-    photoUrl: d.photoUrl || "",
-  }));
 
   const tractorsSheetData = (anyState.tractors || []).map((t) => ({
     id: t.id,
@@ -191,11 +181,6 @@ function exportStateToExcel(anyState) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(
     wb,
-    XLSX.utils.json_to_sheet(driversSheetData),
-    "Drivers"
-  );
-  XLSX.utils.book_append_sheet(
-    wb,
     XLSX.utils.json_to_sheet(tractorsSheetData),
     "Tractors"
   );
@@ -223,20 +208,6 @@ function importExcelFile(file, setDraft) {
       if (!ws) return [];
       return XLSX.utils.sheet_to_json(ws, { defval: "" });
     };
-
-    const importedDrivers = sheetToJSON("Drivers").map((row) => ({
-      id: row.id || crypto.randomUUID(),
-      name: row.name || "",
-      code: row.code || "",
-      canNight: parseBool(row.canNight),
-      sleepsInCab: parseBool(row.sleepsInCab),
-      doubleMannedEligible: parseBool(row.doubleMannedEligible),
-      rating: Number.isFinite(Number(row.rating)) ? Number(row.rating) : 0,
-      photoUrl: row.photoUrl || "",
-      // لو مش موجودة في الإكسل، خليه كل الأيام
-      weekAvailability: [0, 1, 2, 3, 4, 5, 6],
-      leaves: [],
-    }));
 
     const importedTractors = sheetToJSON("Tractors").map((row) => ({
       id: row.id || crypto.randomUUID(),
@@ -277,7 +248,6 @@ function importExcelFile(file, setDraft) {
     setDraft((prev) =>
       buildSafeState({
         ...prev,
-        drivers: importedDrivers,
         tractors: importedTractors,
         trailers: importedTrailers,
         jobs: importedJobs,
@@ -436,7 +406,7 @@ export default function Admin() {
     if (file) {
       if (
         window.confirm(
-          "This will OVERWRITE your current draft (drivers / tractors / trailers / jobs). Continue?"
+          "This will OVERWRITE your current draft (tractors / trailers / jobs). Drivers are managed from the Drivers page. Continue?"
         )
       ) {
         importExcelFile(file, (updater) => {
@@ -467,6 +437,20 @@ export default function Admin() {
       return markDirty(next);
     });
   };
+
+const deleteItem = async (type, id) => {
+  if (!isAdmin) return;
+  try {
+    if (type === "tractors") await apiDeleteTractor(id);
+    else if (type === "trailers") await apiDeleteTrailer(id);
+    // after server soft-delete, remove from local draft
+    deleteDraftItem(type, id);
+  } catch (e) {
+    console.error(e);
+    alert("Delete failed. Nothing was removed from the server.");
+  }
+};
+
 
   const updateDraftItem = (type, id, field, value) => {
     setDraft((prev) => {
@@ -643,7 +627,7 @@ export default function Admin() {
                         <Td right>
                           <button
                             onClick={() =>
-                              deleteDraftItem("tractors", tractor.id)
+                              deleteItem("tractors", tractor.id)
                             }
                             className="text-red-600 hover:text-red-800 p-2 rounded-full hover:bg-red-50 transition-colors"
                             title="Delete tractor"
@@ -734,7 +718,7 @@ export default function Admin() {
                         <Td right>
                           <button
                             onClick={() =>
-                              deleteDraftItem("trailers", trailer.id)
+                              deleteItem("trailers", trailer.id)
                             }
                             className="text-red-600 hover:text-red-800 p-2 rounded-full hover:bg-red-50 transition-colors"
                             title="Delete trailer"
@@ -743,52 +727,6 @@ export default function Admin() {
                           </button>
                         </Td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </SectionCard>
-
-            <SectionCard
-              title="Drivers Management"
-              addLabel="Add Driver"
-              onAdd={() =>
-                addDraftItem("drivers", {
-                  name: "New Driver",
-                  code: "",
-                  canNight: true,
-                  sleepsInCab: false,
-                  doubleMannedEligible: true,
-                  rating: 0,
-                  photoUrl: "",
-                  weekAvailability: [0, 1, 2, 3, 4, 5, 6],
-                  leaves: [],
-                })
-              }
-            >
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs md:text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <Th>Photo</Th>
-                      <Th>Name</Th>
-                      <Th center>Night Shift</Th>
-                      <Th center>Sleeps in Cab</Th>
-                      <Th center>2-man Eligible</Th>
-                      <Th center>Rating</Th>
-                      <Th right>Actions</Th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {(draft?.drivers || []).map((driver) => (
-                      <DriverRow
-                        key={driver.id}
-                        driver={driver}
-                        onChange={(field, value) =>
-                          updateDraftItem("drivers", driver.id, field, value)
-                        }
-                        onDelete={() => deleteDraftItem("drivers", driver.id)}
-                      />
                     ))}
                   </tbody>
                 </table>
@@ -804,155 +742,155 @@ export default function Admin() {
 }
 
 /* ----- Driver Row with Photo upload ----- */
-function DriverRow({ driver, onChange, onDelete }) {
-  const inputRef = useRef(null);
-  const initials =
-    (driver.name || "")
-      .trim()
-      .split(/\s+/)
-      .slice(0, 2)
-      .map((w) => w[0]?.toUpperCase())
-      .join("") || "?";
+// function DriverRow({ driver, onChange, onDelete }) {
+//   const inputRef = useRef(null);
+//   const initials =
+//     (driver.name || "")
+//       .trim()
+//       .split(/\s+/)
+//       .slice(0, 2)
+//       .map((w) => w[0]?.toUpperCase())
+//       .join("") || "?";
 
-  async function downscaleToDataURL(
-    file,
-    maxSize = 256,
-    mime = "image/jpeg",
-    quality = 0.85
-  ) {
-    const bitmap = await createImageBitmap(file);
-    const { width, height } = bitmap;
-    const scale = Math.min(1, maxSize / Math.max(width, height));
-    const w = Math.max(1, Math.round(width * scale));
-    const h = Math.max(1, Math.round(height * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(bitmap, 0, 0, w, h);
-    return canvas.toDataURL(mime, quality);
-  }
+//   async function downscaleToDataURL(
+//     file,
+//     maxSize = 256,
+//     mime = "image/jpeg",
+//     quality = 0.85
+//   ) {
+//     const bitmap = await createImageBitmap(file);
+//     const { width, height } = bitmap;
+//     const scale = Math.min(1, maxSize / Math.max(width, height));
+//     const w = Math.max(1, Math.round(width * scale));
+//     const h = Math.max(1, Math.round(height * scale));
+//     const canvas = document.createElement("canvas");
+//     canvas.width = w;
+//     canvas.height = h;
+//     const ctx = canvas.getContext("2d");
+//     ctx.drawImage(bitmap, 0, 0, w, h);
+//     return canvas.toDataURL(mime, quality);
+//   }
 
-  async function handleSelectFile(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const res = await apiUploadDriverPhoto(driver.id, file);
-      if (res?.url) {
-        onChange("photoUrl", res.url);
-      } else {
-        const dataUrl = await downscaleToDataURL(file, 256);
-        onChange("photoUrl", dataUrl);
-      }
-    } catch {
-      const dataUrl = await downscaleToDataURL(file, 256);
-      onChange("photoUrl", dataUrl);
-    } finally {
-      e.target.value = "";
-    }
-  }
+//   async function handleSelectFile(e) {
+//     const file = e.target.files?.[0];
+//     if (!file) return;
+//     try {
+//       const res = await apiUploadDriverPhoto(driver.id, file);
+//       if (res?.url) {
+//         onChange("photoUrl", res.url);
+//       } else {
+//         const dataUrl = await downscaleToDataURL(file, 256);
+//         onChange("photoUrl", dataUrl);
+//       }
+//     } catch {
+//       const dataUrl = await downscaleToDataURL(file, 256);
+//       onChange("photoUrl", dataUrl);
+//     } finally {
+//       e.target.value = "";
+//     }
+//   }
 
-  return (
-    <tr className="hover:bg-gray-50 transition-colors">
-      <Td>
-        <div className="flex items-center gap-3">
-          {driver.photoUrl ? (
-            <div className="relative">
-              <img
-                src={driver.photoUrl}
-                alt={driver.name}
-                className="h-10 w-10 rounded-full object-cover border border-gray-200"
-              />
-              <button
-                onClick={() => onChange("photoUrl", "")}
-                title="Remove photo"
-                className="absolute -top-1 -right-1 bg-white border border-gray-300 rounded-full p-0.5 hover:bg-gray-50"
-              >
-                <X size={12} />
-              </button>
-            </div>
-          ) : (
-            <div className="h-10 w-10 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center text-xs font-bold">
-              {initials}
-            </div>
-          )}
-          <button
-            onClick={() => inputRef.current?.click()}
-            className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border border-slate-300 hover:bg-slate-50"
-            title="Upload/Change photo"
-          >
-            <ImageIcon size={14} /> Upload
-          </button>
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={handleSelectFile}
-          />
-        </div>
-      </Td>
+//   return (
+//     <tr className="hover:bg-gray-50 transition-colors">
+//       <Td>
+//         <div className="flex items-center gap-3">
+//           {driver.photoUrl ? (
+//             <div className="relative">
+//               <img
+//                 src={driver.photoUrl}
+//                 alt={driver.name}
+//                 className="h-10 w-10 rounded-full object-cover border border-gray-200"
+//               />
+//               <button
+//                 onClick={() => onChange("photoUrl", "")}
+//                 title="Remove photo"
+//                 className="absolute -top-1 -right-1 bg-white border border-gray-300 rounded-full p-0.5 hover:bg-gray-50"
+//               >
+//                 <X size={12} />
+//               </button>
+//             </div>
+//           ) : (
+//             <div className="h-10 w-10 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center text-xs font-bold">
+//               {initials}
+//             </div>
+//           )}
+//           <button
+//             onClick={() => inputRef.current?.click()}
+//             className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border border-slate-300 hover:bg-slate-50"
+//             title="Upload/Change photo"
+//           >
+//             <ImageIcon size={14} /> Upload
+//           </button>
+//           <input
+//             ref={inputRef}
+//             type="file"
+//             accept="image/*"
+//             className="hidden"
+//             onChange={handleSelectFile}
+//           />
+//         </div>
+//       </Td>
 
-      <Td>
-        <input
-          value={driver.name || ""}
-          onChange={(e) => onChange("name", e.target.value)}
-          className="input-field text-xs md:text-sm"
-          placeholder="Driver name..."
-        />
-      </Td>
+//       <Td>
+//         <input
+//           value={driver.name || ""}
+//           onChange={(e) => onChange("name", e.target.value)}
+//           className="input-field text-xs md:text-sm"
+//           placeholder="Driver name..."
+//         />
+//       </Td>
 
-      <Td center>
-        <input
-          type="checkbox"
-          checked={!!driver.canNight}
-          onChange={(e) => onChange("canNight", e.target.checked)}
-          className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
-        />
-      </Td>
+//       <Td center>
+//         <input
+//           type="checkbox"
+//           checked={!!driver.canNight}
+//           onChange={(e) => onChange("canNight", e.target.checked)}
+//           className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+//         />
+//       </Td>
 
-      <Td center>
-        <input
-          type="checkbox"
-          checked={!!driver.sleepsInCab}
-          onChange={(e) => onChange("sleepsInCab", e.target.checked)}
-          className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
-        />
-      </Td>
+//       <Td center>
+//         <input
+//           type="checkbox"
+//           checked={!!driver.sleepsInCab}
+//           onChange={(e) => onChange("sleepsInCab", e.target.checked)}
+//           className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+//         />
+//       </Td>
 
-      <Td center>
-        <input
-          type="checkbox"
-          checked={!!driver.doubleMannedEligible}
-          onChange={(e) => onChange("doubleMannedEligible", e.target.checked)}
-          className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
-        />
-      </Td>
+//       <Td center>
+//         <input
+//           type="checkbox"
+//           checked={!!driver.doubleMannedEligible}
+//           onChange={(e) => onChange("doubleMannedEligible", e.target.checked)}
+//           className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+//         />
+//       </Td>
 
-      <Td center>
-        <input
-          type="number"
-          min={0}
-          max={5}
-          step={0.5}
-          value={Number.isFinite(Number(driver.rating)) ? driver.rating : 0}
-          onChange={(e) => onChange("rating", e.target.value)}
-          className="w-20 border border-gray-300 rounded-md px-2 py-1 text-xs text-center"
-        />
-      </Td>
+//       <Td center>
+//         <input
+//           type="number"
+//           min={0}
+//           max={5}
+//           step={0.5}
+//           value={Number.isFinite(Number(driver.rating)) ? driver.rating : 0}
+//           onChange={(e) => onChange("rating", e.target.value)}
+//           className="w-20 border border-gray-300 rounded-md px-2 py-1 text-xs text-center"
+//         />
+//       </Td>
 
-      <Td right>
-        <button
-          onClick={onDelete}
-          className="text-red-600 hover:text-red-800 p-2 rounded-full hover:bg-red-50 transition-colors"
-          title="Delete driver"
-        >
-          <Trash2 size={16} />
-        </button>
-      </Td>
-    </tr>
-  );
-}
+//       <Td right>
+//         <button
+//           onClick={onDelete}
+//           className="text-red-600 hover:text-red-800 p-2 rounded-full hover:bg-red-50 transition-colors"
+//           title="Delete driver"
+//         >
+//           <Trash2 size={16} />
+//         </button>
+//       </Td>
+//     </tr>
+//   );
+// }
 
 /* ----- small UI helpers ----- */
 function StatCard({ label, value, icon, color }) {

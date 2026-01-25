@@ -4,6 +4,7 @@ import { useDroppable } from "@dnd-kit/core";
 import { Plus, AlertTriangle } from "lucide-react";
 import { Link } from "react-router-dom";
 import { labelsFor } from "../constants/trailerTaxonomy";
+import { getJobSegmentForDay } from "../lib/jobTime";
 
 const STATUS_COLORS = {
   incomplete: "bg-gray-400",
@@ -148,6 +149,7 @@ function SlotDroppable({ dateISO, slot, children, highlight = false }) {
 /* ===== Job card (weekly) ===== */
 function JobCard({
   job,
+  seg,
   onOpen,
   onDelete,
   isAdmin,
@@ -180,7 +182,7 @@ function JobCard({
   return (
     <div
       ref={setNodeRef}
-      className={`relative rounded-lg border shadow-sm p-3 mb-2 cursor-pointer transition-colors ${bgClass} ${
+      className={`relative rounded-lg border shadow-sm p-3 mb-2 cursor-pointer transition-colors ${bgClass} ${seg?.isMultiDay ? "border-purple-300 bg-purple-50" : ""} ${
         isOver ? "border-blue-400 ring-2 ring-blue-100" : ""
       }`}
       onClick={() => onOpen(job.id)}
@@ -203,8 +205,15 @@ function JobCard({
       </div>
 
       <div className="text-[11px] text-gray-500 mb-1">
-        {start} • {dur}h
+        {seg ? `${seg.displayStart} → ${seg.displayEnd}` : start} • {seg ? `${Math.max(0, (seg.endMinutes - seg.startMinutes) / 60).toFixed(1).replace(/\.0$/, "")}h` : `${dur}h`}
       </div>
+      {seg?.isMultiDay ? (
+        <div className="text-[10px] text-purple-700 mb-1">
+          {seg.startsPrevDay ? `↩ Started ${seg.originalStartISO} ${seg.originalStartTime}` : null}
+          {seg.startsPrevDay && seg.endsNextDay ? " • " : null}
+          {seg.endsNextDay ? `↪ Ends ${seg.originalEndISO} ${seg.originalEndTime}` : null}
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap gap-1 mb-1">
         {tractor ? (
@@ -330,13 +339,20 @@ export default function WeekView({
           });
           const dayNum = dayDate.getDate();
 
-          const jobsOfDay = allJobs
-            .filter((j) => j.date && j.date.slice(0, 10) === iso)
-            .filter(jobPassesFilters)
-            .map((j) => ({ ...j, slot: j.slot === "night" ? "night" : "day" }));
+          const jobSegmentsOfDay = allJobs
+            .map((job) => {
+              const seg = getJobSegmentForDay(job, iso);
+              if (!seg) return null;
+              return {
+                job: { ...job, slot: job.slot === "night" ? "night" : "day" },
+                seg,
+              };
+            })
+            .filter(Boolean)
+            .filter(({ job }) => jobPassesFilters(job));
 
-          const dayJobs = jobsOfDay.filter((j) => j.slot === "day");
-          const nightJobs = jobsOfDay.filter((j) => j.slot === "night");
+          const dayJobs = jobSegmentsOfDay.filter((x) => x.seg.displaySlot === "day");
+          const nightJobs = jobSegmentsOfDay.filter((x) => x.seg.displaySlot === "night");
 
           return (
             <div key={iso} className="flex flex-col gap-2">
@@ -379,7 +395,7 @@ export default function WeekView({
                       {isAdmin ? "Drop here or click +" : "No jobs"}
                     </div>
                   ) : (
-                    dayJobs.map((job) => {
+                    dayJobs.map(({ job, seg }) => {
                       const driverEntries = (job.driverIds || [])
                         .map((dId) => {
                           const d = state.drivers?.find(
@@ -411,6 +427,7 @@ export default function WeekView({
                         <JobCard
                           key={job.id}
                           job={job}
+                          seg={seg}
                           onOpen={onOpenJob}
                           onDelete={onDeleteJob}
                           isAdmin={isAdmin}
@@ -446,7 +463,7 @@ export default function WeekView({
                       {isAdmin ? "Drop here or click +" : "No jobs"}
                     </div>
                   ) : (
-                    nightJobs.map((job) => {
+                    nightJobs.map(({ job, seg }) => {
                       const driverEntries = (job.driverIds || [])
                         .map((dId) => {
                           const d = state.drivers?.find(
@@ -478,6 +495,7 @@ export default function WeekView({
                         <JobCard
                           key={job.id}
                           job={job}
+                          seg={seg}
                           onOpen={onOpenJob}
                           onDelete={onDeleteJob}
                           isAdmin={isAdmin}

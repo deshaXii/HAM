@@ -1,4 +1,15 @@
 // src/lib/jobValidation.js
+// Validation for jobs (drivers / tractors / trailers) with true time-interval overlap support.
+// Supports overnight jobs that span multiple days.
+
+import {
+  getJobInterval,
+  getJobTouchedDays,
+  intervalsOverlap,
+  parseISODateLocal,
+  minutesToTime,
+  toISODateLocal,
+} from "./jobTime";
 
 const DAY_NAME_TO_NUM = {
   sun: 0,
@@ -14,30 +25,6 @@ function shortIso(x) {
   return String(x || "").slice(0, 10);
 }
 
-function timeToMinutes(t) {
-  if (!t) return 0;
-  const [h, m] = String(t)
-    .split(":")
-    .map((x) => parseInt(x || "0", 10));
-  return h * 60 + (m || 0);
-}
-
-function minutesToTime(mins) {
-  const total = ((mins % (24 * 60)) + 24 * 60) % (24 * 60);
-  const h = Math.floor(total / 60);
-  const m = total % 60;
-  const pad = (n) => (n < 10 ? `0${n}` : String(n));
-  return `${pad(h)}:${pad(m)}`;
-}
-
-function rangesOverlap(startA, durA, startB, durB) {
-  const a1 = timeToMinutes(startA);
-  const a2 = a1 + (durA || 0) * 60;
-  const b1 = timeToMinutes(startB);
-  const b2 = b1 + (durB || 0) * 60;
-  return Math.max(a1, b1) < Math.min(a2, b2);
-}
-
 function defaultStartForSlot(slot) {
   if (slot === "night") return "20:00";
   return "08:00";
@@ -51,7 +38,8 @@ function normalizeWeekAvailability(wa) {
       .map((v) => {
         if (typeof v === "number") return v;
         const s = String(v).toLowerCase();
-        if (DAY_NAME_TO_NUM.hasOwnProperty(s)) return DAY_NAME_TO_NUM[s];
+        if (Object.prototype.hasOwnProperty.call(DAY_NAME_TO_NUM, s))
+          return DAY_NAME_TO_NUM[s];
         const n = parseInt(s, 10);
         return Number.isNaN(n) ? null : n;
       })
@@ -62,7 +50,8 @@ function normalizeWeekAvailability(wa) {
       .filter((k) => !!wa[k])
       .map((k) => {
         const s = String(k).toLowerCase();
-        if (DAY_NAME_TO_NUM.hasOwnProperty(s)) return DAY_NAME_TO_NUM[s];
+        if (Object.prototype.hasOwnProperty.call(DAY_NAME_TO_NUM, s))
+          return DAY_NAME_TO_NUM[s];
         const n = parseInt(s, 10);
         return Number.isNaN(n) ? null : n;
       })
@@ -75,7 +64,7 @@ function driverWorksOnDay(driver, isoDate) {
   const list = normalizeWeekAvailability(driver?.weekAvailability);
   if (list === null) return true;
   if (Array.isArray(list) && list.length === 0) return false;
-  const weekdayJs = new Date(shortIso(isoDate)).getDay();
+  const weekdayJs = parseISODateLocal(shortIso(isoDate)).getDay();
   return list.includes(weekdayJs);
 }
 
@@ -91,9 +80,16 @@ function driverOnLeave(driver, isoDate) {
 }
 
 function driverAllowedForJob(driver, job) {
+  // night permission applies based on job start slot
   if (job.slot === "night" && driver?.canNight === false) return false;
-  if (!driverWorksOnDay(driver || {}, job.date)) return false;
-  if (driverOnLeave(driver || {}, job.date)) return false;
+
+  const touchedDays = getJobTouchedDays(job);
+  const days = touchedDays.length ? touchedDays : [job.date];
+
+  for (const dayISO of days) {
+    if (!driverWorksOnDay(driver || {}, dayISO)) return false;
+    if (driverOnLeave(driver || {}, dayISO)) return false;
+  }
   return true;
 }
 
@@ -103,12 +99,46 @@ function getEffectiveDurationHours(job) {
   return real;
 }
 
-function isResourceBusy(jobs, excludeJobId, dateISO, start, dur, predicate) {
+function formatInterval(job) {
+  const interval = getJobInterval(job);
+  if (!interval) {
+    const s = job.start || "--:--";
+    return `${shortIso(job.date)} ${s}`;
+  }
+  const start = interval.start;
+  const end = interval.end;
+  const startISO = toISODateLocal(start);
+  const endISO = toISODateLocal(end);
+  const startTime = job.start || minutesToTime(0);
+  const endTime = `${String(end.getHours()).padStart(2, "0")}:${String(
+    end.getMinutes()
+  ).padStart(2, "0")}`;
+  return `${startISO} ${startTime} → ${endISO} ${endTime}`;
+}
+
+function isResourceBusy(jobs, excludeJobId, candidateJob, predicate) {
+  const candInterval = getJobInterval(candidateJob);
+  if (!candInterval) return false;
+
   return (jobs || []).some((other) => {
+    if (!other) return false;
     if (other.id === excludeJobId) return false;
-    if (shortIso(other.date) !== shortIso(dateISO)) return false;
+    if (!predicate(other)) return false;
+
+    const otherStart = other.start || defaultStartForSlot(other.slot);
     const otherDur = getEffectiveDurationHours(other);
-    return predicate(other) && rangesOverlap(start, dur, other.start, otherDur);
+    if (!other.date || !otherStart || otherDur <= 0) return false;
+
+    const otherNorm = { ...other, start: otherStart, durationHours: otherDur };
+    const otherInterval = getJobInterval(otherNorm);
+    if (!otherInterval) return false;
+
+    return intervalsOverlap(
+      candInterval.start,
+      candInterval.end,
+      otherInterval.start,
+      otherInterval.end
+    );
   });
 }
 
@@ -127,41 +157,42 @@ function exceedsDriverLimitForTractor(state, job, newDriverId) {
 export function validateWholeJob(state, candidateJob, originalJobId) {
   const start = candidateJob.start || defaultStartForSlot(candidateJob.slot);
   const dur = getEffectiveDurationHours(candidateJob);
+  const candidateNorm = { ...candidateJob, start, durationHours: dur };
+
+  // If job has no schedule yet, allow edits (conflicts only apply when scheduled)
+  if (!candidateNorm.date || !candidateNorm.start || !candidateNorm.durationHours) {
+    return { ok: true };
+  }
+
+  const intervalLabel = formatInterval(candidateNorm);
 
   // drivers
-  if (Array.isArray(candidateJob.driverIds)) {
-    for (const dId of candidateJob.driverIds) {
+  if (Array.isArray(candidateNorm.driverIds)) {
+    for (const dId of candidateNorm.driverIds) {
       const driver = (state.drivers || []).find((d) => d.id === dId);
 
-      if (!driverAllowedForJob(driver, candidateJob)) {
+      if (!driverAllowedForJob(driver, candidateNorm)) {
         return {
           ok: false,
-          reason: `Driver "${
-            driver?.name || dId
-          }" is not available on ${shortIso(candidateJob.date)}.`,
+          reason: `Driver "${driver?.name || dId}" is not available for ${intervalLabel}.`,
         };
       }
 
       const busy = isResourceBusy(
         state.jobs,
         originalJobId,
-        candidateJob.date,
-        start,
-        dur,
-        (other) =>
-          Array.isArray(other.driverIds) && other.driverIds.includes(dId)
+        candidateNorm,
+        (other) => Array.isArray(other.driverIds) && other.driverIds.includes(dId)
       );
+
       if (busy) {
         return {
           ok: false,
-          reason: `Driver "${
-            driver?.name || dId
-          }" is already busy on ${shortIso(
-            candidateJob.date
-          )} at ${start} for ${dur}h.`,
+          reason: `Driver "${driver?.name || dId}" is already busy during ${intervalLabel}.`,
         };
       }
-      if (exceedsDriverLimitForTractor(state, candidateJob, dId)) {
+
+      if (exceedsDriverLimitForTractor(state, candidateNorm, dId)) {
         return {
           ok: false,
           reason:
@@ -172,41 +203,35 @@ export function validateWholeJob(state, candidateJob, originalJobId) {
   }
 
   // tractor
-  if (candidateJob.tractorId) {
+  if (candidateNorm.tractorId) {
     const busyTr = isResourceBusy(
       state.jobs,
       originalJobId,
-      candidateJob.date,
-      start,
-      dur,
-      (o) => String(o.tractorId) === String(candidateJob.tractorId)
+      candidateNorm,
+      (o) => String(o.tractorId) === String(candidateNorm.tractorId)
     );
-    if (busyTr)
+    if (busyTr) {
       return {
         ok: false,
-        reason: `This tractor is already busy on ${shortIso(
-          candidateJob.date
-        )} at ${start}.`,
+        reason: `This tractor is already busy during ${intervalLabel}.`,
       };
+    }
   }
 
   // trailer
-  if (candidateJob.trailerId) {
+  if (candidateNorm.trailerId) {
     const busyTrl = isResourceBusy(
       state.jobs,
       originalJobId,
-      candidateJob.date,
-      start,
-      dur,
-      (o) => String(o.trailerId) === String(candidateJob.trailerId)
+      candidateNorm,
+      (o) => String(o.trailerId) === String(candidateNorm.trailerId)
     );
-    if (busyTrl)
+    if (busyTrl) {
       return {
         ok: false,
-        reason: `This trailer is already busy on ${shortIso(
-          candidateJob.date
-        )} at ${start}.`,
+        reason: `This trailer is already busy during ${intervalLabel}.`,
       };
+    }
   }
 
   return { ok: true };
