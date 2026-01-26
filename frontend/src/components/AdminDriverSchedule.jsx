@@ -90,9 +90,7 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers, selectedId
         leaves: Array.isArray(d.leaves) ? d.leaves : [],
       }));
 
-      if (!selectedId) return list;
-      const picked = list.find((x) => x.id === selectedId);
-      return picked ? [picked] : list;
+      return list;
     },
     [drivers, selectedId]
   );
@@ -145,6 +143,13 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers, selectedId
   }, [local, isAdmin, onSaveDrivers]);
   const [rangeFrom, setRangeFrom] = useState("");
   const [rangeTo, setRangeTo] = useState("");
+
+  const visibleDrivers = useMemo(() => {
+    if (!selectedId) return local;
+    const picked = (local || []).find((d) => d.id === selectedId);
+    return picked ? [picked] : local;
+  }, [local, selectedId]);
+
 
   if (!isAdmin) {
     return (
@@ -222,7 +227,7 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers, selectedId
       )}
 
       <div className="space-y-4">
-        {local.map((drv) => (
+        {visibleDrivers.map((drv) => (
           <div
             key={drv.id}
             className="bg-white border border-gray-200 rounded-lg shadow-sm p-4"

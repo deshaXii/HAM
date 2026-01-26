@@ -438,14 +438,31 @@ export default function AdminDriversPage() {
   }
 
   function setDrivers(nextDrivers, { save = true } = {}) {
+    const snapshot = fullStateRef.current;
+    const prevDrivers = Array.isArray(snapshot?.drivers) ? snapshot.drivers : [];
+
+    let finalDrivers = Array.isArray(nextDrivers) ? nextDrivers : prevDrivers;
+
+    // ✅ Safety guard: if a child component accidentally sends a partial list
+    // (e.g., only the selected driver), we merge by id instead of replacing.
+    if (Array.isArray(nextDrivers) && nextDrivers.length > 0 && nextDrivers.length < prevDrivers.length) {
+      const map = new Map(prevDrivers.map((d) => [d?.id, d]));
+      for (const d of nextDrivers) {
+        if (!d?.id) continue;
+        map.set(d.id, { ...(map.get(d.id) || {}), ...(d || {}) });
+      }
+      finalDrivers = Array.from(map.values());
+    }
+
     setFullState((prev) => {
       if (!prev) return prev;
-      const next = { ...prev, drivers: nextDrivers };
+      const next = { ...prev, drivers: finalDrivers };
       fullStateRef.current = next;
       return next;
     });
+
     markDirty();
-    if (save) scheduleSave(nextDrivers, true);
+    if (save) scheduleSave(finalDrivers, true);
   }
 
   async function handleDeleteDriver(id) {
