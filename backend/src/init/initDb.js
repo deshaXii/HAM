@@ -330,6 +330,41 @@ async function ensureNormalizedPlannerTables() {
     ) ENGINE=InnoDB;
   `);
 
+  // Extra optional job fields used by the Job modal (route + financials)
+  // We ALTER here so existing DBs self-heal without requiring manual migrations.
+  const jobCols = await getColumnSet("jobs");
+  if (!jobCols.has("start_point")) {
+    await tryQuery(`ALTER TABLE jobs ADD COLUMN start_point VARCHAR(200) NULL`);
+  }
+  if (!jobCols.has("end_point")) {
+    await tryQuery(`ALTER TABLE jobs ADD COLUMN end_point VARCHAR(200) NULL`);
+  }
+  if (!jobCols.has("allow_start_override")) {
+    await tryQuery(
+      `ALTER TABLE jobs ADD COLUMN allow_start_override TINYINT(1) NOT NULL DEFAULT 0`
+    );
+  }
+  if (!jobCols.has("revenue_trip")) {
+    await tryQuery(
+      `ALTER TABLE jobs ADD COLUMN revenue_trip DECIMAL(10,2) NOT NULL DEFAULT 0`
+    );
+  }
+  if (!jobCols.has("cost_driver")) {
+    await tryQuery(
+      `ALTER TABLE jobs ADD COLUMN cost_driver DECIMAL(10,2) NOT NULL DEFAULT 0`
+    );
+  }
+  if (!jobCols.has("cost_truck")) {
+    await tryQuery(
+      `ALTER TABLE jobs ADD COLUMN cost_truck DECIMAL(10,2) NOT NULL DEFAULT 0`
+    );
+  }
+  if (!jobCols.has("cost_diesel")) {
+    await tryQuery(
+      `ALTER TABLE jobs ADD COLUMN cost_diesel DECIMAL(10,2) NOT NULL DEFAULT 0`
+    );
+  }
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS job_drivers (
       job_id VARCHAR(64) NOT NULL,

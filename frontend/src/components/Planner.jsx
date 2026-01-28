@@ -352,7 +352,8 @@ export default function Planner() {
     });
   }
 
-  function updateJob(jobId, updates) {
+  // Returns {ok:true} on success, or {ok:false, reason, field} on validation failure.
+  async function updateJob(jobId, updates) {
     const oldJob = (state.jobs || []).find((j) => j.id === jobId);
     if (!oldJob) return;
 
@@ -369,21 +370,36 @@ export default function Planner() {
       candidate.durationHours || 0
     );
     if (!wasPast && willBePast) {
-      alert("You cannot move a job completely into the past.");
-      return;
+      return { ok: false, reason: "You cannot move a job completely into the past.", field: "time" };
     }
 
     const check = validateWholeJob(state, candidate, jobId);
     if (!check.ok) {
-      alert(check.reason);
-      return;
+      const r = String(check.reason || "");
+      const lower = r.toLowerCase();
+      const field = lower.includes("tractor")
+        ? "tractor"
+        : lower.includes("trailer")
+        ? "trailer"
+        : lower.includes("driver") || lower.includes("2-man") || lower.includes("double")
+        ? "drivers"
+        : "general";
+      return { ok: false, reason: check.reason, field };
     }
 
     const next = {
       ...state,
       jobs: (state.jobs || []).map((j) => (j.id === jobId ? candidate : j)),
     };
-    persistIfAdmin(next);
+    try {
+      await persistIfAdmin(next);
+      return { ok: true };
+    } catch (e) {
+      const msg =
+        e?.message ||
+        "Save failed on server. Your changes are kept in the form — please try again.";
+      return { ok: false, reason: msg, field: "general" };
+    }
   }
 
   function deleteJob(jobId) {
@@ -980,9 +996,10 @@ export default function Planner() {
           allJobs={state.jobs || []}
           isAdmin={isAdmin}
           onClose={closeJobModal}
-          onSave={(updates) => {
-            updateJob(selectedJob.id, updates);
-            closeJobModal();
+          onSave={async (updates) => {
+            const res = await updateJob(selectedJob.id, updates);
+            if (res?.ok) closeJobModal();
+            return res || { ok: false, reason: "Save failed", field: "general" };
           }}
           onDelete={() => {
             deleteJob(selectedJob.id);

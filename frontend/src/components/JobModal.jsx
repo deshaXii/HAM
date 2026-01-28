@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef } from "react";
 import {
   X,
   Save,
@@ -58,6 +58,15 @@ export default function JobModal({
   onSave,
   onDelete,
 }) {
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [saveErrorField, setSaveErrorField] = useState("");
+
+  const tractorRef = useRef(null);
+  const trailerRef = useRef(null);
+  const driversRef = useRef(null);
+  const routeRef = useRef(null);
+  const financialRef = useRef(null);
   const [form, setForm] = useState(() => ({
     ...job,
     driverIds: Array.isArray(job.driverIds) ? job.driverIds : [],
@@ -82,7 +91,45 @@ export default function JobModal({
 
   // endTime is derived from start + durationHours.
 
+  const scrollToField = (field) => {
+    const map = {
+      tractor: tractorRef,
+      trailer: trailerRef,
+      drivers: driversRef,
+      route: routeRef,
+      financial: financialRef,
+      time: null,
+      general: null,
+    };
+    const ref = map[field];
+    if (ref?.current) {
+      ref.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  };
+
+  const showError = (field, message) => {
+    setSaveError(String(message || "Save failed"));
+    setSaveErrorField(field || "general");
+    scrollToField(field || "general");
+  };
+
+  const clearErrorIfRelated = (key) => {
+    if (!saveErrorField) return;
+    const related =
+      (key === "tractorId" && saveErrorField === "tractor") ||
+      (key === "trailerId" && saveErrorField === "trailer") ||
+      ((key === "driverIds" || key === "_drivers") && saveErrorField === "drivers") ||
+      ((key === "startPoint" || key === "endPoint" || key === "allowStartOverride") && saveErrorField === "route") ||
+      ((key === "revenueTrip" || key === "costDriver" || key === "costTruck" || key === "costDiesel") &&
+        saveErrorField === "financial");
+    if (related) {
+      setSaveError("");
+      setSaveErrorField("");
+    }
+  };
+
   const set = (key, value) => {
+    clearErrorIfRelated(key);
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
@@ -91,11 +138,59 @@ export default function JobModal({
     setForm((prev) => {
       const current = Array.isArray(prev.driverIds) ? prev.driverIds : [];
       const exists = current.includes(driverId);
+
+      // removing is always allowed
+      if (exists) {
+        return {
+          ...prev,
+          driverIds: current.filter((id) => id !== driverId),
+        };
+      }
+
+      // --- business rules: max drivers + 2-man eligibility ---
+      const tractor = (tractors || []).find(
+        (t) => String(t.id) === String(prev.tractorId)
+      );
+      const tractorAllowsTwo = tractor ? tractor.doubleManned === true : null;
+      const maxDrivers = tractorAllowsTwo === false ? 1 : 2;
+
+      if (current.length >= maxDrivers) {
+        showError(
+          "drivers",
+          maxDrivers === 1
+            ? "This tractor allows only 1 driver."
+            : "A job can have at most 2 drivers."
+        );
+        return prev;
+      }
+
+      // if adding a second driver, both drivers must be 2-man eligible
+      if (current.length === 1) {
+        const existing = (drivers || []).find(
+          (d) => String(d.id) === String(current[0])
+        );
+        const incoming = (drivers || []).find(
+          (d) => String(d.id) === String(driverId)
+        );
+        if (existing?.doubleMannedEligible === false) {
+          showError(
+            "drivers",
+            `Driver "${existing?.name || existing?.id}" is not eligible for 2-man jobs.`
+          );
+          return prev;
+        }
+        if (incoming?.doubleMannedEligible === false) {
+          showError(
+            "drivers",
+            `Driver "${incoming?.name || incoming?.id}" is not eligible for 2-man jobs.`
+          );
+          return prev;
+        }
+      }
+
       return {
         ...prev,
-        driverIds: exists
-          ? current.filter((id) => id !== driverId)
-          : [...current, driverId],
+        driverIds: [...current, driverId],
       };
     });
   };
@@ -121,14 +216,31 @@ export default function JobModal({
     : [];
   const selectedTrailerLabels = labelsFor(selectedTrailerTypes);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!isAdmin || !onSave) return;
-    const payload = {
-      ...form,
-      // خلي overrideStart دايمًا synced مع allowStartOverride
-      overrideStart: form.allowStartOverride,
-    };
-    onSave(payload);
+    setSaveError("");
+    setSaveErrorField("");
+    setSaving(true);
+    try {
+      const payload = {
+        ...form,
+        // خلي overrideStart دايمًا synced مع allowStartOverride
+        overrideStart: form.allowStartOverride,
+      };
+      const res = await onSave(payload);
+      if (res?.ok === false) {
+        showError(res.field || "general", res.reason || "Save failed");
+      }
+    } catch (e) {
+      const msg =
+        e?.reason ||
+        e?.message ||
+        e?.response?.data?.message ||
+        "Save failed. Please try again.";
+      showError("general", msg);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const startDisabled =
@@ -161,13 +273,22 @@ export default function JobModal({
 
         {/* body */}
         <div className="p-5 space-y-5 max-h-[78vh] overflow-y-auto">
+          {saveError && (
+            <div className="flex items-start gap-2 p-3 rounded-lg border border-red-200 bg-red-50 text-red-800 text-sm">
+              <AlertTriangle size={18} className="mt-0.5" />
+              <div>
+                <div className="font-medium">Cannot save</div>
+                <div className="text-xs mt-0.5">{saveError}</div>
+              </div>
+            </div>
+          )}
           {/* === 1) basic info + time === */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="bg-gray-50/50 rounded-lg p-3 border border-gray-100">
               <h4 className="text-xs font-semibold text-gray-700 mb-3">
                 Basic
               </h4>
-              <label className="block mb-2">
+              <label ref={tractorRef} className="block mb-2">
                 <span className="block text-[11px] font-medium text-gray-600 mb-1">
                   Client
                 </span>
@@ -223,7 +344,9 @@ export default function JobModal({
                   Tractor
                 </span>
                 <select
-                  className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={`w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    saveErrorField === "tractor" ? "ring-2 ring-red-500 border-red-300" : ""
+                  }`}
                   value={form.tractorId || ""}
                   onChange={(e) => set("tractorId", e.target.value)}
                   disabled={!isAdmin}
@@ -231,19 +354,21 @@ export default function JobModal({
                   <option value="">— None —</option>
                   {(tractors || []).map((t) => (
                     <option key={t.id} value={t.id}>
-                      {t.code || t.plate || t.id}
+                      {(t.code || t.id) + (t.plate ? ` • ${t.plate}` : "")}
                     </option>
                   ))}
                 </select>
               </label>
 
               {/* trailer */}
-              <label className="block mb-2">
+              <label ref={trailerRef} className="block mb-2">
                 <span className="block text-[11px] font-medium text-gray-600 mb-1">
                   Trailer
                 </span>
                 <select
-                  className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={`w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    saveErrorField === "trailer" ? "ring-2 ring-red-500 border-red-300" : ""
+                  }`}
                   value={form.trailerId || ""}
                   onChange={(e) => set("trailerId", e.target.value)}
                   disabled={!isAdmin}
@@ -251,7 +376,7 @@ export default function JobModal({
                   <option value="">— None —</option>
                   {(trailers || []).map((tr) => (
                     <option key={tr.id} value={tr.id}>
-                      {tr.code || tr.id}
+                      {(tr.code || tr.id) + (tr.plate ? ` • ${tr.plate}` : "")}
                     </option>
                   ))}
                 </select>
@@ -273,7 +398,12 @@ export default function JobModal({
           </div>
 
           {/* Drivers */}
-          <div className="bg-gray-50/40 rounded-lg p-3 border border-gray-100">
+          <div
+            ref={driversRef}
+            className={`bg-gray-50/40 rounded-lg p-3 border ${
+              saveErrorField === "drivers" ? "border-red-300 ring-2 ring-red-500" : "border-gray-100"
+            }`}
+          >
             <div>
               <span className="block text-[11px] font-medium text-gray-600 mb-1">
                 Drivers
@@ -281,16 +411,53 @@ export default function JobModal({
               <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto">
                 {(drivers || []).map((d) => {
                   const checked = form.driverIds.includes(d.id);
+                  const tractor = (tractors || []).find(
+                    (t) => String(t.id) === String(form.tractorId)
+                  );
+                  const tractorAllowsTwo = tractor ? tractor.doubleManned === true : null;
+                  const maxDrivers = tractorAllowsTwo === false ? 1 : 2;
+                  const currentCount = form.driverIds.length;
+                  let blocked = false;
+                  let blockedReason = "";
+
+                  if (!checked) {
+                    if (currentCount >= maxDrivers) {
+                      blocked = true;
+                      blockedReason =
+                        maxDrivers === 1
+                          ? "This tractor allows only 1 driver"
+                          : "Max 2 drivers per job";
+                    } else if (currentCount === 1) {
+                      const existing = (drivers || []).find(
+                        (x) => String(x.id) === String(form.driverIds[0])
+                      );
+                      if (existing?.doubleMannedEligible === false) {
+                        blocked = true;
+                        blockedReason = "Existing driver not 2-man eligible";
+                      } else if (d?.doubleMannedEligible === false) {
+                        blocked = true;
+                        blockedReason = "Driver not 2-man eligible";
+                      }
+                    }
+                  }
+                  const disabled = !isAdmin || blocked;
                   return (
                     <button
                       key={d.id}
                       type="button"
-                      onClick={() => toggleDriver(d.id)}
+                      onClick={() => {
+                        if (disabled) {
+                          if (blockedReason) showError("drivers", blockedReason);
+                          return;
+                        }
+                        toggleDriver(d.id);
+                      }}
                       className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] border ${
                         checked
                           ? "bg-purple-50 border-purple-300 text-purple-700"
                           : "bg-white hover:bg-gray-100 border-gray-200 text-gray-600"
-                      } ${!isAdmin ? "opacity-50 cursor-not-allowed" : ""}`}
+                      } ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
+                      title={blockedReason || ""}
                     >
                       <User size={12} />
                       {d.name || d.code || d.id}
@@ -307,7 +474,12 @@ export default function JobModal({
           </div>
 
           {/* Route */}
-          <div className="bg-gray-50/40 rounded-lg p-3 border border-gray-100">
+          <div
+            ref={routeRef}
+            className={`bg-gray-50/40 rounded-lg p-3 border ${
+              saveErrorField === "route" ? "border-red-300 ring-2 ring-red-500" : "border-gray-100"
+            }`}
+          >
             <h4 className="text-xs font-semibold text-gray-700 mb-3 flex items-center gap-1">
               <Package2 size={14} /> Route
             </h4>
@@ -371,7 +543,12 @@ export default function JobModal({
           </div>
 
           {/* Financials */}
-          <div className="bg-gray-50/40 rounded-lg p-3 border border-gray-100">
+          <div
+            ref={financialRef}
+            className={`bg-gray-50/40 rounded-lg p-3 border ${
+              saveErrorField === "financial" ? "border-red-300 ring-2 ring-red-500" : "border-gray-100"
+            }`}
+          >
             <h4 className="text-xs font-semibold text-gray-700 mb-3 flex items-center gap-1">
               <Wallet size={14} /> Financials
             </h4>
@@ -470,9 +647,12 @@ export default function JobModal({
             {isAdmin && (
               <button
                 onClick={handleSave}
-                className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded"
+                disabled={saving}
+                className={`inline-flex items-center gap-2 text-white text-sm px-4 py-2 rounded ${
+                  saving ? "bg-blue-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"
+                }`}
               >
-                <Save size={16} /> Save
+                <Save size={16} /> {saving ? "Saving..." : "Save"}
               </button>
             )}
           </div>

@@ -57,13 +57,23 @@ function normalizePricing(p) {
 
 function normalizeJobInput(jobIn) {
   const j = jobIn || {};
-  const id = safeStr(j.id, 64) || `job-${uuidv4()}`;
+  const id = safeStr(j.id, 64).trim() || `job-${uuidv4()}`;
   const date = isoDateOnly(j.date) || isoDateOnly(new Date());
   const start = safeStr(j.start || "", 10);
-  const slot = Math.trunc(safeNum(j.slot, 0));
+  // slot can arrive as 0/1 or as strings like "day"/"night" from the UI
+  let slot = 0;
+  if (typeof j.slot === "string") {
+    const s = j.slot.trim().toLowerCase();
+    slot = s === "night" || s === "n" || s === "1" ? 1 : 0;
+  } else {
+    slot = Math.trunc(safeNum(j.slot, 0));
+  }
   const client = safeStr(j.client || "", 200);
   const pickup = safeStr(j.pickup || "", 200);
   const dropoff = safeStr(j.dropoff || "", 200);
+  const startPoint = safeStr(j.startPoint || j.start_point || "", 200);
+  const endPoint = safeStr(j.endPoint || j.end_point || "", 200);
+  const allowStartOverride = !!(j.allowStartOverride ?? j.allow_start_override ?? j.overrideStart ?? false);
   const durationHours = safeNum(j.durationHours, 0);
   const pricing = j.pricing || {};
   const pricingType = pricing.type === "fixed" ? "fixed" : "per_km";
@@ -71,6 +81,10 @@ function normalizeJobInput(jobIn) {
   const tractorId = safeStr(j.tractorId || "", 64).trim() || null;
   const trailerId = safeStr(j.trailerId || "", 64).trim() || null;
   const notes = String(j.notes || "");
+  const revenueTrip = safeNum(j.revenueTrip ?? j.revenue_trip, 0);
+  const costDriver = safeNum(j.costDriver ?? j.cost_driver, 0);
+  const costTruck = safeNum(j.costTruck ?? j.cost_truck, 0);
+  const costDiesel = safeNum(j.costDiesel ?? j.cost_diesel, 0);
   const driverIds = safeArray(j.driverIds)
     .map((x) => safeStr(x, 64).trim())
     .filter(Boolean);
@@ -83,14 +97,78 @@ function normalizeJobInput(jobIn) {
     client,
     pickup,
     dropoff,
+    startPoint,
+    endPoint,
+    allowStartOverride,
     durationHours,
     pricingType,
     pricingValue,
     tractorId,
     trailerId,
     notes,
+    revenueTrip,
+    costDriver,
+    costTruck,
+    costDiesel,
     driverIds,
   };
+}
+
+function make400(code, message) {
+  const err = new Error(message);
+  err.status = 400;
+  err.code = code;
+  return err;
+}
+
+async function assertTwoManRules(conn, job) {
+  const driverIds = safeArray(job.driverIds);
+  const count = driverIds.length;
+
+  // Global cap: max 2 drivers per job.
+  if (count > 2) {
+    throw make400(
+      "DRIVER_LIMIT_EXCEEDED",
+      "A job can have at most 2 drivers."
+    );
+  }
+
+  if (count <= 1) return;
+
+  // If tractor is specified, it must allow double-manned.
+  if (job.tractorId) {
+    const [tRows] = await conn.query(
+      `SELECT double_manned FROM tractors WHERE id = ? LIMIT 1`,
+      [job.tractorId]
+    );
+    const allows = !!(tRows && tRows[0] && Number(tRows[0].double_manned) === 1);
+    if (!allows) {
+      throw make400(
+        "TRACTOR_NOT_DOUBLE_MANNED",
+        "This tractor does not allow double-manned (max 1 driver)."
+      );
+    }
+  }
+
+  // All drivers must be 2-man eligible when there are 2 drivers.
+  const ph = driverIds.map(() => "?").join(",");
+  const [dRows] = await conn.query(
+    `SELECT id, double_manned_eligible FROM drivers WHERE id IN (${ph})`,
+    driverIds
+  );
+  const eligMap = new Map((dRows || []).map((r) => [String(r.id), Number(r.double_manned_eligible)]));
+
+  for (const id of driverIds) {
+    if (!eligMap.has(String(id))) {
+      throw make400("INVALID_DRIVER_ID", `Invalid driver id: ${id}`);
+    }
+    if (eligMap.get(String(id)) !== 1) {
+      throw make400(
+        "DRIVER_NOT_2MAN_ELIGIBLE",
+        `Driver ${id} is not eligible for 2-man jobs.`
+      );
+    }
+  }
 }
 
 function mapJobRow(r, driverMap) {
@@ -107,19 +185,27 @@ function mapJobRow(r, driverMap) {
     client: r.client || "",
     pickup: r.pickup || "",
     dropoff: r.dropoff || "",
+    startPoint: r.start_point || "",
+    endPoint: r.end_point || "",
+    allowStartOverride: Number(r.allow_start_override) === 1,
     durationHours: safeNum(r.duration_hours, 0),
     pricing,
     tractorId: r.tractor_id || "",
     trailerId: r.trailer_id || "",
     driverIds: driverMap.get(r.id) || [],
     notes: r.notes || "",
+    revenueTrip: safeNum(r.revenue_trip, 0),
+    costDriver: safeNum(r.cost_driver, 0),
+    costTruck: safeNum(r.cost_truck, 0),
+    costDiesel: safeNum(r.cost_diesel, 0),
   };
 }
 
 async function selectJobs(conn = pool) {
   const [rows] = await conn.query(
-    `SELECT id, date, start, slot, client, pickup, dropoff, duration_hours, pricing_type, pricing_value,
-            tractor_id, trailer_id, notes
+    `SELECT id, date, start, slot, client, pickup, dropoff, start_point, end_point, allow_start_override,
+            revenue_trip, cost_driver, cost_truck, cost_diesel,
+            duration_hours, pricing_type, pricing_value, tractor_id, trailer_id, notes
      FROM jobs
      WHERE deleted_at IS NULL
      ORDER BY date ASC, slot ASC, start ASC`
@@ -141,8 +227,9 @@ async function selectJobs(conn = pool) {
 
 async function selectJobById(id, conn = pool) {
   const [rows] = await conn.query(
-    `SELECT id, date, start, slot, client, pickup, dropoff, duration_hours, pricing_type, pricing_value,
-            tractor_id, trailer_id, notes
+    `SELECT id, date, start, slot, client, pickup, dropoff, start_point, end_point, allow_start_override,
+            revenue_trip, cost_driver, cost_truck, cost_diesel,
+            duration_hours, pricing_type, pricing_value, tractor_id, trailer_id, notes
      FROM jobs
      WHERE id = ?
      LIMIT 1`,
@@ -180,10 +267,15 @@ async function createJob(req, res) {
     await conn.beginTransaction();
     await assertVersion(conn, incomingVersion);
 
+    // enforce 2-man rules server-side
+    await assertTwoManRules(conn, job);
+
     await conn.query(
       `INSERT INTO jobs
-        (id, date, start, slot, client, pickup, dropoff, duration_hours, pricing_type, pricing_value, tractor_id, trailer_id, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (id, date, start, slot, client, pickup, dropoff, start_point, end_point, allow_start_override,
+         revenue_trip, cost_driver, cost_truck, cost_diesel,
+         duration_hours, pricing_type, pricing_value, tractor_id, trailer_id, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         job.id,
         job.date,
@@ -192,6 +284,13 @@ async function createJob(req, res) {
         job.client,
         job.pickup,
         job.dropoff,
+        job.startPoint,
+        job.endPoint,
+        job.allowStartOverride ? 1 : 0,
+        job.revenueTrip,
+        job.costDriver,
+        job.costTruck,
+        job.costDiesel,
         job.durationHours,
         job.pricingType,
         job.pricingValue,
@@ -251,12 +350,16 @@ async function updateJob(req, res) {
     await conn.beginTransaction();
     await assertVersion(conn, incomingVersion);
 
+    // enforce 2-man rules server-side
+    await assertTwoManRules(conn, job);
+
     const before = await selectJobById(id, conn);
 
     await conn.query(
       `UPDATE jobs
-       SET date=?, start=?, slot=?, client=?, pickup=?, dropoff=?, duration_hours=?, pricing_type=?, pricing_value=?,
-           tractor_id=?, trailer_id=?, notes=?
+       SET date=?, start=?, slot=?, client=?, pickup=?, dropoff=?, start_point=?, end_point=?, allow_start_override=?,
+           revenue_trip=?, cost_driver=?, cost_truck=?, cost_diesel=?,
+           duration_hours=?, pricing_type=?, pricing_value=?, tractor_id=?, trailer_id=?, notes=?
        WHERE id=? AND deleted_at IS NULL`,
       [
         job.date,
@@ -265,6 +368,13 @@ async function updateJob(req, res) {
         job.client,
         job.pickup,
         job.dropoff,
+        job.startPoint,
+        job.endPoint,
+        job.allowStartOverride ? 1 : 0,
+        job.revenueTrip,
+        job.costDriver,
+        job.costTruck,
+        job.costDiesel,
         job.durationHours,
         job.pricingType,
         job.pricingValue,
@@ -387,11 +497,17 @@ async function batchJobs(req, res) {
       throw err;
     }
 
-for (const j of upserts) {
+    for (const j of upserts) {
+      // enforce 2-man rules server-side
+      await assertTwoManRules(conn, j);
       await conn.query(
         `INSERT INTO jobs
-          (id, date, start, slot, client, pickup, dropoff, duration_hours, pricing_type, pricing_value, tractor_id, trailer_id, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (id, date, start, slot, client, pickup, dropoff,
+           start_point, end_point, allow_start_override,
+           revenue_trip, cost_driver, cost_truck, cost_diesel,
+           duration_hours, pricing_type, pricing_value,
+           tractor_id, trailer_id, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
            date=VALUES(date),
            start=VALUES(start),
@@ -399,6 +515,13 @@ for (const j of upserts) {
            client=VALUES(client),
            pickup=VALUES(pickup),
            dropoff=VALUES(dropoff),
+           start_point=VALUES(start_point),
+           end_point=VALUES(end_point),
+           allow_start_override=VALUES(allow_start_override),
+           revenue_trip=VALUES(revenue_trip),
+           cost_driver=VALUES(cost_driver),
+           cost_truck=VALUES(cost_truck),
+           cost_diesel=VALUES(cost_diesel),
            duration_hours=VALUES(duration_hours),
            pricing_type=VALUES(pricing_type),
            pricing_value=VALUES(pricing_value),
@@ -413,6 +536,13 @@ for (const j of upserts) {
           j.client,
           j.pickup,
           j.dropoff,
+          j.startPoint,
+          j.endPoint,
+          j.allowStartOverride ? 1 : 0,
+          j.revenueTrip,
+          j.costDriver,
+          j.costTruck,
+          j.costDiesel,
           j.durationHours,
           j.pricingType,
           j.pricingValue,

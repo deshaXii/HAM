@@ -142,22 +142,61 @@ function isResourceBusy(jobs, excludeJobId, candidateJob, predicate) {
   });
 }
 
-function exceedsDriverLimitForTractor(state, job, newDriverId) {
-  const tractor = (state.tractors || []).find((t) => t.id === job.tractorId);
-  const currentDrivers = Array.isArray(job.driverIds) ? job.driverIds : [];
-  const alreadyIn = currentDrivers.includes(newDriverId);
-  if (alreadyIn) return false;
-  const afterCount = currentDrivers.length + 1;
-  const tractorAllowsTwo = tractor?.doubleManned === true;
-  if (!tractorAllowsTwo && afterCount > 1) return true;
-  if (tractorAllowsTwo && afterCount > 2) return true;
-  return false;
+function tractorAllowsTwoDrivers(state, tractorId) {
+  if (!tractorId) return null;
+  const tractor = (state.tractors || []).find(
+    (t) => String(t.id) === String(tractorId)
+  );
+  if (!tractor) return null;
+  return tractor?.doubleManned === true;
+}
+
+function validateDriverCountAndEligibility(state, job) {
+  const driverIds = Array.isArray(job.driverIds) ? job.driverIds : [];
+  const count = driverIds.length;
+
+  // Global hard rule: never allow more than 2 drivers on a job.
+  if (count > 2) {
+    return {
+      ok: false,
+      reason: "A job can have at most 2 drivers.",
+    };
+  }
+
+  const tractorTwo = tractorAllowsTwoDrivers(state, job.tractorId);
+  if (tractorTwo === false && count > 1) {
+    return {
+      ok: false,
+      reason: "This tractor does not allow double-manned (max 1 driver).",
+    };
+  }
+
+  // If there are 2 drivers, they must both be eligible for 2-man operation.
+  if (count > 1) {
+    for (const dId of driverIds) {
+      const driver = (state.drivers || []).find(
+        (d) => String(d.id) === String(dId)
+      );
+      if (driver && driver.doubleMannedEligible === false) {
+        return {
+          ok: false,
+          reason: `Driver "${driver?.name || dId}" is not eligible for 2-man jobs.`,
+        };
+      }
+    }
+  }
+
+  return { ok: true };
 }
 
 export function validateWholeJob(state, candidateJob, originalJobId) {
   const start = candidateJob.start || defaultStartForSlot(candidateJob.slot);
   const dur = getEffectiveDurationHours(candidateJob);
   const candidateNorm = { ...candidateJob, start, durationHours: dur };
+
+  // Always enforce hard business rules (even if the job isn't scheduled yet)
+  const countCheck = validateDriverCountAndEligibility(state, candidateNorm);
+  if (!countCheck.ok) return countCheck;
 
   // If job has no schedule yet, allow edits (conflicts only apply when scheduled)
   if (!candidateNorm.date || !candidateNorm.start || !candidateNorm.durationHours) {
@@ -192,13 +231,6 @@ export function validateWholeJob(state, candidateJob, originalJobId) {
         };
       }
 
-      if (exceedsDriverLimitForTractor(state, candidateNorm, dId)) {
-        return {
-          ok: false,
-          reason:
-            "This tractor does not allow more drivers for this job (2-man rule).",
-        };
-      }
     }
   }
 

@@ -273,12 +273,14 @@ export default function DayPlanner() {
           "Data was updated by another admin / browser tab.\nYour last change on this day view was NOT saved.\nPlease reload the page before editing again."
         );
       }
+      throw e;
     } finally {
       setSaving(false);
     }
   }
 
-  const updateJob = (jobId, updates) => {
+  // Returns {ok:true} on success, or {ok:false, reason, field} on validation failure.
+  const updateJob = async (jobId, updates) => {
     if (!state || !isAdmin) return;
     const oldJob = state.jobs.find((j) => j.id === jobId);
     if (!oldJob) return;
@@ -301,20 +303,35 @@ export default function DayPlanner() {
       candidate.durationHours || 0
     );
     if (!wasPast && willBePast) {
-      alert("You cannot move a job completely into the past.");
-      return;
+      return { ok: false, reason: "You cannot move a job completely into the past.", field: "time" };
     }
 
     const check = validateWholeJob(state, candidate, jobId);
     if (!check.ok) {
-      alert(check.reason);
-      return;
+      const r = String(check.reason || "");
+      const lower = r.toLowerCase();
+      const field = lower.includes("tractor")
+        ? "tractor"
+        : lower.includes("trailer")
+        ? "trailer"
+        : lower.includes("driver") || lower.includes("2-man") || lower.includes("double")
+        ? "drivers"
+        : "general";
+      return { ok: false, reason: check.reason, field };
     }
 
     const newJobs = state.jobs.map((job) =>
       job.id === jobId ? candidate : job
     );
-    persistIfAdmin({ ...state, jobs: newJobs });
+    try {
+      await persistIfAdmin({ ...state, jobs: newJobs });
+      return { ok: true };
+    } catch (e) {
+      const msg =
+        e?.message ||
+        "Save failed on server. Your changes are kept in the form — please try again.";
+      return { ok: false, reason: msg, field: "general" };
+    }
   };
 
   const deleteJob = (jobId) => {
@@ -733,9 +750,10 @@ export default function DayPlanner() {
           allJobs={state.jobs || []}
           isAdmin={isAdmin}
           onClose={closeJobModal}
-          onSave={(updates) => {
-            updateJob(activeJobId, updates);
-            closeJobModal();
+          onSave={async (updates) => {
+            const res = await updateJob(activeJobId, updates);
+            if (res?.ok) closeJobModal();
+            return res || { ok: false, reason: "Save failed", field: "general" };
           }}
           onDelete={() => {
             deleteJob(activeJobId);
