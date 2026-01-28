@@ -84,6 +84,10 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers, selectedId
         canNight: !!d.canNight,
         sleepsInCab: !!d.sleepsInCab,
         doubleMannedEligible: !!d.doubleMannedEligible,
+        // IMPORTANT: preserve rating when editing schedule/availability.
+        // If we drop it here, any subsequent autosave will PATCH the driver without rating,
+        // and the UI will appear to reset rating back to 0.
+        rating: Number.isFinite(Number(d.rating)) ? Number(d.rating) : 0,
         weekAvailability: Array.isArray(d.weekAvailability)
           ? d.weekAvailability
           : [0, 1, 2, 3, 4, 5, 6],
@@ -115,6 +119,7 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers, selectedId
       canNight: !!d.canNight,
       sleepsInCab: !!d.sleepsInCab,
       doubleMannedEligible: !!d.doubleMannedEligible,
+      rating: Number.isFinite(Number(d.rating)) ? Number(d.rating) : 0,
       weekAvailability: Array.isArray(d.weekAvailability)
         ? d.weekAvailability.slice().sort()
         : [0, 1, 2, 3, 4, 5, 6],

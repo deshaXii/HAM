@@ -239,12 +239,19 @@ async function ensureNormalizedPlannerTables() {
       can_night TINYINT(1) DEFAULT 1,
       sleeps_in_cab TINYINT(1) DEFAULT 0,
       double_manned_eligible TINYINT(1) DEFAULT 1,
+      rating DECIMAL(3,1) NOT NULL DEFAULT 0,
       week_availability_json TEXT,
       leaves_json TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB;
   `);
+
+  // Self-heal: add rating column if older DB
+  const dcols2 = await getColumnSet("drivers");
+  if (!dcols2.has("rating")) {
+    await tryQuery(`ALTER TABLE drivers ADD COLUMN rating DECIMAL(3,1) NOT NULL DEFAULT 0`);
+  }
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS tractors (
