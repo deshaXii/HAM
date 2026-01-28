@@ -12,6 +12,7 @@ import {
   Users,
   Copy,
 } from "lucide-react";
+import { jobShortKey } from "../lib/jobKey";
 
 const STATUS_COLORS = {
   incomplete: "bg-gray-400",
@@ -332,6 +333,7 @@ const JobCard = ({
 
   const pickupLabel = job.startPoint || job.pickup || "Start?";
   const dropoffLabel = job.endPoint || job.dropoff || "End?";
+  const shortKey = jobShortKey(job.id);
 
   return (
     <div
@@ -349,8 +351,18 @@ const JobCard = ({
       {/* Header: Client + actions */}
       <div className="flex items-start justify-between gap-2 mb-1">
         <div className="flex-1 min-w-0 pl-3">
-          <h4 className={`font-semibold text-gray-900 ${isDayList ? "text-base" : "text-sm"} truncate`}>
-            {job.client || "New Client"}
+          <h4
+            className={`font-semibold text-gray-900 ${isDayList ? "text-base" : "text-sm"}`}
+            title={`${job.client || "New Client"}${shortKey ? ` (#${shortKey})` : ""}`}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="truncate">{job.client || "New Client"}</span>
+              {shortKey ? (
+                <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-700 text-[10px] font-semibold border border-gray-200">
+                  #{shortKey}
+                </span>
+              ) : null}
+            </div>
           </h4>
           <div className="mt-[2px] flex items-center gap-1 text-[11px] text-gray-600">
             <Clock size={12} />

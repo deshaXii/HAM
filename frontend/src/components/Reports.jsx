@@ -19,6 +19,8 @@ import {
 import * as XLSX from "xlsx";
 import { apiGetState } from "../lib/api";
 import useServerEventRefetch from "../hooks/useServerEventRefetch";
+import { jobShortKey } from "../lib/jobKey";
+import { useNavigate } from "react-router-dom";
 
 /* ---------- Helpers ---------- */
 function monthKey(isoDate) {
@@ -106,13 +108,14 @@ function Modal({ open, onClose, title, children, widthClass = "max-w-3xl" }) {
   );
 }
 
-function JobList({ jobs, tractors, drivers, trailers }) {
+function JobList({ jobs, tractors, drivers, trailers, onOpenJob }) {
   if (!jobs?.length)
     return <div className="text-sm text-gray-500">No events.</div>;
 
   return (
     <div className="space-y-2">
       {jobs.map((j) => {
+        const shortKey = jobShortKey(j.id);
         const tractor = tractors.find(
           (t) => String(t.id) === String(j.tractorId)
         );
@@ -134,9 +137,28 @@ function JobList({ jobs, tractors, drivers, trailers }) {
           >
             <div className="flex items-center justify-between">
               <div className="font-semibold text-sm text-gray-900">
-                {j.client || "(No client)"} • {j.date}
+                <span className="inline-flex items-center gap-2 min-w-0">
+                  <span className="truncate">{j.client || "(No client)"}</span>
+                  {shortKey ? (
+                    <span className="shrink-0 px-2 py-0.5 rounded-md bg-gray-100 text-gray-700 text-[11px] font-semibold border border-gray-200">
+                      #{shortKey}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="text-gray-500"> • {j.date}</span>
               </div>
-              <div className="text-xs text-gray-500">{fmtTimeRange(j)}</div>
+              <div className="flex items-center gap-2">
+                <div className="text-xs text-gray-500">{fmtTimeRange(j)}</div>
+                {onOpenJob ? (
+                  <button
+                    onClick={() => onOpenJob(j)}
+                    className="text-xs px-2 py-1 rounded-md border bg-white hover:bg-gray-100"
+                    title="Open this job in Day view"
+                  >
+                    Open
+                  </button>
+                ) : null}
+              </div>
             </div>
 
             <div className="mt-1 text-xs text-gray-600 flex flex-wrap gap-2">
@@ -171,6 +193,7 @@ function JobList({ jobs, tractors, drivers, trailers }) {
 
 /* ---------- Main ---------- */
 export default function Reports() {
+  const navigate = useNavigate();
   const [state, setState] = useState({
     drivers: [],
     tractors: [],
@@ -182,6 +205,16 @@ export default function Reports() {
   const [clientQuery, setClientQuery] = useState("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+
+  const openJobInDayView = useCallback(
+    (job) => {
+      const d = job?.date;
+      const id = job?.id;
+      if (!d || !id) return;
+      navigate(`/day/${d}?job=${encodeURIComponent(String(id))}`);
+    },
+    [navigate]
+  );
 
   const printRef = useRef(null);
 
@@ -226,12 +259,21 @@ export default function Reports() {
   const filteredJobs = useMemo(() => {
     let jobs = safeArr(state.jobs);
     if (clientQuery.trim()) {
-      const q = clientQuery.trim().toLowerCase();
-      jobs = jobs.filter((j) =>
-        String(j.client || "")
-          .toLowerCase()
-          .includes(q)
-      );
+      const raw = clientQuery.trim();
+      const q = raw.toLowerCase();
+      const keyQuery = raw.replace(/^#/, "").trim().toUpperCase();
+      const looksLikeKey = /^[A-Z0-9]{2,10}$/.test(keyQuery);
+
+      jobs = jobs.filter((j) => {
+        const client = String(j.client || "").toLowerCase();
+        const k = jobShortKey(j.id);
+        if (raw.startsWith("#") && looksLikeKey) {
+          // Explicit key search (#D692)
+          return k.includes(keyQuery);
+        }
+        // Normal: match client name OR key
+        return client.includes(q) || (looksLikeKey && k.includes(keyQuery));
+      });
     }
     if (fromDate) jobs = jobs.filter((j) => (j.date || "") >= fromDate);
     if (toDate) jobs = jobs.filter((j) => (j.date || "") <= toDate);
@@ -433,7 +475,7 @@ export default function Reports() {
               <div className="relative">
                 <input
                   className="input-field w-full pl-8"
-                  placeholder="Type client name (or pick from suggestions below)"
+                  placeholder="Search by client name, or by job key (e.g. #D692)"
                   value={clientQuery}
                   onChange={(e) => setClientQuery(e.target.value)}
                 />
@@ -737,6 +779,7 @@ export default function Reports() {
           tractors={state.tractors}
           drivers={state.drivers}
           trailers={state.trailers}
+          onOpenJob={openJobInDayView}
         />
       </Modal>
 

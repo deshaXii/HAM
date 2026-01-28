@@ -5,6 +5,7 @@ import { Plus, AlertTriangle } from "lucide-react";
 import { Link } from "react-router-dom";
 import { labelsFor } from "../constants/trailerTaxonomy";
 import { getJobSegmentForDay } from "../lib/jobTime";
+import { jobShortKey } from "../lib/jobKey";
 
 const STATUS_COLORS = {
   incomplete: "bg-gray-400",
@@ -158,6 +159,7 @@ function JobCard({
   trailer,
   warnings = [],
 }) {
+  const shortKey = jobShortKey(job.id);
   const trailerTypes = trailer
     ? Array.isArray(trailer.types)
       ? trailer.types
@@ -188,8 +190,18 @@ function JobCard({
       onClick={() => onOpen(job.id)}
     >
       <div className="flex items-start justify-between gap-2 mb-1">
-        <div className="text-xs font-semibold text-gray-800 truncate">
-          {job.client || "New Client"}
+        <div
+          className="text-xs font-semibold text-gray-800 min-w-0"
+          title={`${job.client || "New Client"}${shortKey ? ` (#${shortKey})` : ""}`}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="truncate">{job.client || "New Client"}</span>
+            {shortKey ? (
+              <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-white/70 text-gray-700 text-[10px] font-semibold border border-gray-200">
+                #{shortKey}
+              </span>
+            ) : null}
+          </div>
         </div>
         {isAdmin && (
           <button

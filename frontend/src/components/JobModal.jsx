@@ -9,6 +9,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { labelsFor } from "../constants/trailerTaxonomy";
+import { jobShortKey } from "../lib/jobKey";
 
 function toLocationNameArray(locations) {
   if (!Array.isArray(locations)) return [];
@@ -61,6 +62,8 @@ export default function JobModal({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [saveErrorField, setSaveErrorField] = useState("");
+
+  const shortKey = jobShortKey(job?.id);
 
   const tractorRef = useRef(null);
   const trailerRef = useRef(null);
@@ -260,7 +263,7 @@ export default function JobModal({
               Edit Job
             </h3>
             <p className="text-xs text-gray-500">
-              #{job.id} • {job.date} • {job.slot?.toUpperCase?.()}
+              {shortKey ? `#${shortKey} • ` : ""}#{job.id} • {job.date} • {job.slot?.toUpperCase?.()}
             </p>
           </div>
           <button

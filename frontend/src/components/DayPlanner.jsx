@@ -1,6 +1,6 @@
 // src/components/DayPlanner.jsx
 import React, { useState, useEffect } from "react";
-import { Navigate, useParams } from "react-router-dom";
+import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { validateWholeJob } from "../lib/jobValidation";
 
 import {
@@ -201,6 +201,8 @@ function isJobCompletelyInPast(dateISO, start, durationHours) {
 /* ===== component ===== */
 export default function DayPlanner() {
   const { date } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
 
@@ -243,6 +245,20 @@ export default function DayPlanner() {
         setState(fixedState);
         setIsJobModalOpen(false);
         setActiveJobId(null);
+
+        // If we arrived from Reports with ?job=<id>, open it automatically.
+        const jobIdParam = new URLSearchParams(location.search).get("job");
+        if (jobIdParam) {
+          const exists = Array.isArray(fixedState?.jobs)
+            ? fixedState.jobs.some((j) => String(j.id) === String(jobIdParam))
+            : false;
+          if (exists) {
+            // Open after state is set.
+            setTimeout(() => openJobModal(String(jobIdParam)), 0);
+          }
+          // Clean the URL (avoid reopening on refresh)
+          navigate(location.pathname, { replace: true });
+        }
       } catch (e) {
         console.error("failed to load day planner state", e);
         setState(null);
@@ -250,7 +266,7 @@ export default function DayPlanner() {
         setLoading(false);
       }
     })();
-  }, [date]);
+  }, [date, location.pathname, location.search, navigate]);
 
   // ✅ التعديل هنا: ناخد النسخة اللي راجعة من السيرفر بعد الحفظ
   async function persistIfAdmin(nextState) {
