@@ -92,10 +92,15 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers, selectedId
 
       return list;
     },
-    [drivers, selectedId]
+    // ✅ IMPORTANT: selection should NOT re-normalize the drivers list.
+    // Changing selectedId would reset local state and accidentally trigger an auto-save.
+    [drivers]
   );
 
   const [local, setLocal] = useState(normalized);
+
+  // When we sync local from props (reload/save), do NOT push changes back up.
+  const skipNextPushRef = useRef(false);
 
   // Debounced push-up so the page-level Save/auto-save owns persistence.
   const didMountRef = useRef(false);
@@ -119,6 +124,7 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers, selectedId
 
   useEffect(() => {
     // keep local in sync when drivers prop changes (e.g., reload)
+    skipNextPushRef.current = true;
     setLocal(normalized);
   }, [normalized]);
 
@@ -129,6 +135,12 @@ export default function AdminDriverSchedule({ drivers, onSaveDrivers, selectedId
     // Skip the first push on mount so we don't save immediately on load.
     if (!didMountRef.current) {
       didMountRef.current = true;
+      return;
+    }
+
+    // If the change came from syncing props -> local, don't propagate back up.
+    if (skipNextPushRef.current) {
+      skipNextPushRef.current = false;
       return;
     }
 

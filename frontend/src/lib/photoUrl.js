@@ -1,23 +1,27 @@
 export function resolveDriverPhotoUrl(photoUrl) {
   if (!photoUrl) return "";
 
+  // Use the same base strategy as the API client.
+  // In dev, VITE_API_URL is typically like "http://localhost:4000".
+  // In prod, it may be empty and we fall back to same-origin.
+  const API_BASE = String(
+    import.meta.env.VITE_API_URL || window.location.origin
+  ).replace(/\/+$/, "");
+
   // لو url كامل
   if (/^https?:\/\//i.test(photoUrl)) return photoUrl;
 
-  // لو جاي "/uploads/..."
-  if (photoUrl.startsWith("/uploads/")) {
-    return `${window.location.origin}/api${photoUrl}`;
+  // if we already have an absolute path from the API
+  // (backend serves both /uploads and /api/uploads)
+  if (photoUrl.startsWith("/uploads/") || photoUrl.startsWith("/api/uploads/")) {
+    return `${API_BASE}${photoUrl}`;
   }
 
-  // لو جاي "/api/uploads/..."
-  if (photoUrl.startsWith("/api/uploads/")) {
-    return `${window.location.origin}${photoUrl}`;
-  }
-
-  // لو جاي "uploads/..."
+  // if it's a relative path without leading slash
   if (photoUrl.startsWith("uploads/")) {
-    return `${window.location.origin}/api/${photoUrl}`;
+    return `${API_BASE}/${photoUrl}`;
   }
 
-  return `${window.location.origin}/api/uploads/${photoUrl.replace(/^\/+/, "")}`;
+  // Otherwise treat it as a filename and serve from /uploads
+  return `${API_BASE}/uploads/${photoUrl.replace(/^\/+/, "")}`;
 }

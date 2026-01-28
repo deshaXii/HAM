@@ -298,6 +298,9 @@ export default function AdminDriversPage() {
   const [selectedDriverId, setSelectedDriverId] = useState(null);
   const [isDirty, setIsDirty] = useState(false);
   const isDirtyRef = useRef(false);
+  // A stable signature of the last persisted drivers list.
+  // We compute "Unsaved" from actual data differences, not from incidental re-renders.
+  const savedDriversSigRef = useRef("");
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [saveError, setSaveError] = useState("");
   const [hasConflict, setHasConflict] = useState(false);
@@ -305,6 +308,37 @@ export default function AdminDriversPage() {
   const savingRef = useRef(false);
   const fullStateRef = useRef(null);
   const saveTimerRef = useRef(null);
+  const latestDriversRef = useRef([]);
+  const changeSeqRef = useRef(0);
+
+  function driversSignature(list) {
+    const arr = Array.isArray(list) ? list : [];
+    const normalized = arr
+      .map((d) => ({
+        id: String(d?.id || ""),
+        name: String(d?.name || ""),
+        code: String(d?.code || ""),
+        photoUrl: String(d?.photoUrl || ""),
+        canNight: !!d?.canNight,
+        sleepsInCab: !!d?.sleepsInCab,
+        doubleMannedEligible: !!d?.doubleMannedEligible,
+        rating: Number(d?.rating || 0),
+        weekAvailability: Array.isArray(d?.weekAvailability)
+          ? [...d.weekAvailability].sort((a, b) => a - b)
+          : [0, 1, 2, 3, 4, 5, 6],
+        leaves: Array.isArray(d?.leaves) ? [...d.leaves].sort() : [],
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+    return JSON.stringify(normalized);
+  }
+
+  function syncDirtyFromList(list) {
+    const sig = driversSignature(list);
+    const dirty = sig !== savedDriversSigRef.current;
+    isDirtyRef.current = dirty;
+    setIsDirty(dirty);
+    return dirty;
+  }
 
   useEffect(() => {
     (async () => {
@@ -319,6 +353,8 @@ export default function AdminDriversPage() {
         // Default selection: first driver (if any)
         const firstId = safeState?.drivers?.[0]?.id || null;
         setSelectedDriverId(firstId);
+        // Treat the freshly-loaded list as the persisted baseline.
+        savedDriversSigRef.current = driversSignature(safeState.drivers);
         isDirtyRef.current = false;
         setIsDirty(false);
         setHasConflict(false);
@@ -333,6 +369,11 @@ export default function AdminDriversPage() {
   }, []);
 
   const drivers = useMemo(() => fullState?.drivers || [], [fullState]);
+
+  // Keep a live ref to the latest drivers list so debounced saves never use stale data.
+  useEffect(() => {
+    latestDriversRef.current = Array.isArray(drivers) ? drivers : [];
+  }, [drivers]);
 
   // Keep selection valid
   useEffect(() => {
@@ -354,12 +395,8 @@ export default function AdminDriversPage() {
     });
   }, [drivers, query]);
 
-  function markDirty() {
-    isDirtyRef.current = true;
-    setIsDirty(true);
-  }
-
-  function clearDirty() {
+  function markSaved(list) {
+    savedDriversSigRef.current = driversSignature(list);
     isDirtyRef.current = false;
     setIsDirty(false);
   }
@@ -373,6 +410,8 @@ export default function AdminDriversPage() {
     savingRef.current = true;
     setIsSaving(true);
     setSaveError("");
+
+    const seqAtStart = changeSeqRef.current;
     // Never persist large in-memory previews (base64) to the DB/state.
     const sanitizedDrivers = (Array.isArray(driversList) ? driversList : []).map((d) => {
       const { photoPreview, ...rest } = d || {};
@@ -382,11 +421,28 @@ export default function AdminDriversPage() {
     try {
       const nextState = { ...snapshot, drivers: sanitizedDrivers };
       const saved = await apiSaveState(nextState);
-      setFullState(saved);
-      fullStateRef.current = saved;
-      clearDirty();
-      setHasConflict(false);
-      setLastSavedAt(Date.now());
+
+      // If something changed while we were saving, don't overwrite the UI with older drivers.
+      // Instead, only update the meta/version, keep the latest UI list, and trigger another save.
+      const changedDuringSave = changeSeqRef.current !== seqAtStart;
+      if (changedDuringSave) {
+        const latest = fullStateRef.current;
+        const merged = {
+          ...(latest || saved),
+          version: saved?.version ?? latest?.version,
+          weekStart: saved?.weekStart ?? latest?.weekStart,
+        };
+        setFullState(merged);
+        fullStateRef.current = merged;
+        // Keep dirty; save again using the newest list.
+        scheduleSave(latestDriversRef.current, true);
+      } else {
+        setFullState(saved);
+        fullStateRef.current = saved;
+        markSaved(saved?.drivers || sanitizedDrivers);
+        setHasConflict(false);
+        setLastSavedAt(Date.now());
+      }
     } catch (err) {
       console.error(err);
 
@@ -405,7 +461,7 @@ export default function AdminDriversPage() {
             const saved2 = await apiSaveState({ ...safeFresh, drivers: sanitizedDrivers });
             setFullState(saved2);
             fullStateRef.current = saved2;
-            clearDirty();
+            markSaved(saved2?.drivers || sanitizedDrivers);
             setHasConflict(false);
             setLastSavedAt(Date.now());
             return;
@@ -430,10 +486,17 @@ export default function AdminDriversPage() {
   }
 
   function scheduleSave(driversList, silent = true) {
-    // Debounce to avoid hammering the server when editing availability grid
+    // Debounce to avoid hammering the server when editing availability grid.
+    // IMPORTANT: never capture a stale list in the closure.
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
-      saveDrivers(driversList, { silent });
+      // If a save is in-flight, wait a bit and try again (otherwise the autosave can be dropped).
+      if (savingRef.current) {
+        scheduleSave(driversList, silent);
+        return;
+      }
+      const latest = latestDriversRef.current;
+      saveDrivers(Array.isArray(latest) ? latest : driversList, { silent });
     }, 700);
   }
 
@@ -454,15 +517,19 @@ export default function AdminDriversPage() {
       finalDrivers = Array.from(map.values());
     }
 
+    // Bump a sequence so we can detect edits during an in-flight save.
+    changeSeqRef.current += 1;
+
     setFullState((prev) => {
       if (!prev) return prev;
       const next = { ...prev, drivers: finalDrivers };
       fullStateRef.current = next;
+      latestDriversRef.current = finalDrivers;
       return next;
     });
 
-    markDirty();
-    if (save) scheduleSave(finalDrivers, true);
+    const dirty = syncDirtyFromList(finalDrivers);
+    if (save && dirty) scheduleSave(finalDrivers, true);
   }
 
   async function handleDeleteDriver(id) {
@@ -471,8 +538,41 @@ export default function AdminDriversPage() {
     if (!ok) return;
 
     try {
-      await apiDeleteDriver(id); // explicit delete intent header is included in api
-      setDrivers(drivers.filter((d) => d.id !== id), { save: false });
+      // Cancel any pending debounced saves (otherwise an older queued save may recreate the driver)
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+
+      const r = await apiDeleteDriver(id); // explicit delete intent header is included in api
+
+      // Prefer the server source of truth (drivers + version).
+      const nextDrivers = Array.isArray(r?.drivers)
+        ? r.drivers
+        : drivers.filter((d) => d.id !== id);
+
+      setFullState((prev) => {
+        if (!prev) return prev;
+        const next = {
+          ...prev,
+          drivers: nextDrivers,
+          version: r?.meta?.version ?? prev.version,
+        };
+        fullStateRef.current = next;
+        latestDriversRef.current = nextDrivers;
+        return next;
+      });
+
+      // Update selection if we deleted the currently selected driver.
+      setSelectedDriverId((prevId) => {
+        if (prevId !== id) return prevId;
+        return nextDrivers?.[0]?.id || null;
+      });
+
+      // Delete is already persisted, so mark as saved.
+      markSaved(nextDrivers);
+      setHasConflict(false);
+      setLastSavedAt(Date.now());
     } catch (e) {
       console.error(e);
       alert("Delete failed. Nothing was removed from the server.");
@@ -522,7 +622,7 @@ export default function AdminDriversPage() {
         const exists = safeState?.drivers?.some((d) => d.id === prevId);
         return exists ? prevId : safeState?.drivers?.[0]?.id || null;
       });
-      clearDirty();
+      markSaved(safeState.drivers);
       setHasConflict(false);
       setSaveError("");
     } catch (e) {
@@ -534,7 +634,7 @@ export default function AdminDriversPage() {
   }
 
   async function handleSaveNow() {
-    await saveDrivers(drivers, { silent: false });
+    await saveDrivers(latestDriversRef.current, { silent: false });
   }
 
   if (!isAdmin) {

@@ -83,7 +83,8 @@ async function uploadDriverPhoto(req, res) {
 
   const base = buildPublicApiBase(req);
   // NOTE: app serves static uploads at /uploads (behind /api it becomes /api/uploads)
-  const url = `${base}/uploads/${req.file.filename}`;
+  const relativePath = `/uploads/${req.file.filename}`;
+  const url = `${base}${relativePath}`;
 
   const conn = await pool.getConnection();
   try {
