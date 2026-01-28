@@ -120,7 +120,17 @@ async function createDriver(req, res) {
     await conn.query(
       `INSERT INTO drivers
         (id, name, code, photo_url, can_night, sleeps_in_cab, double_manned_eligible, week_availability_json, leaves_json)
-       VALUES (?,?,?,?,?,?,?,?,?)`,
+       VALUES (?,?,?,?,?,?,?,?,?)
+       ON DUPLICATE KEY UPDATE
+         name = VALUES(name),
+         code = VALUES(code),
+         photo_url = VALUES(photo_url),
+         can_night = VALUES(can_night),
+         sleeps_in_cab = VALUES(sleeps_in_cab),
+         double_manned_eligible = VALUES(double_manned_eligible),
+         week_availability_json = VALUES(week_availability_json),
+         leaves_json = VALUES(leaves_json),
+         deleted_at = NULL`,
       [
         payload.id,
         payload.name,

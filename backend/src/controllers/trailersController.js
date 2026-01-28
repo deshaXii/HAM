@@ -42,7 +42,7 @@ async function selectTrailers(conn = pool) {
 
 async function selectTrailerById(id, conn = pool) {
   const [rows] = await conn.query(
-    `SELECT id, code, plate, current_location
+    `SELECT id, code, plate
      FROM trailers
      WHERE id = ?
      LIMIT 1`,

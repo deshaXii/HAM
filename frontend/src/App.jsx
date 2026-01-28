@@ -25,11 +25,10 @@ import {
   Users,
   CalendarDays,
   Printer,
-  MapPin,
   ListChecks,
 } from "lucide-react";
 import AdminDriversPage from "./components/Drivers";
-import LocationsMap from "./components/LocationsMap"; // <<< NEW
+
 
 // -------- Navigation bar --------
 function Navigation() {
@@ -78,13 +77,6 @@ function Navigation() {
       label: "Agenda",
       color: "text-blue-600",
       role: "admin",
-    },
-    {
-      path: "/locations",
-      icon: MapPin,
-      label: "Locations",
-      color: "text-emerald-600",
-      role: "admin", // نخليها للأدمن علشان تعديل اللوكيشنز
     },
   ];
 
@@ -217,15 +209,6 @@ function AppInner() {
                 </ProtectedRoute>
               }
             />
-            <Route
-              path="/locations"
-              element={
-                <AdminRoute>
-                  <LocationsMap />
-                </AdminRoute>
-              }
-            />
-
             <Route
               path="/dashboard"
               element={

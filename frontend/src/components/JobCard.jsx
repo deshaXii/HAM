@@ -139,6 +139,7 @@ const JobCard = ({
   onOpen,
   onDuplicate,
   isAdmin,
+  variant = "compact",
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState(() => ({
@@ -157,6 +158,31 @@ const JobCard = ({
 
   const warnings = getJobWarnings(job, resources);
   const hasWarnings = warnings.length > 0;
+
+  const isDayList = variant === "day-list";
+
+  const routeStart =
+    (job?.allowStartOverride && (job?.startPoint || job?.pickup))
+      ? job.startPoint || job.pickup
+      : job?.pickup || job?.startPoint || "";
+  const routeEnd = job?.dropoff || job?.endPoint || "";
+
+  const tractor = job?.tractorId ? getTractor(job.tractorId) : null;
+  const trailer = job?.trailerId ? getTrailer(job.trailerId) : null;
+
+  // UI labels (safe): prefer code, then plate, else short id.
+  const tractorLabel = tractor
+    ? tractor.code || tractor.plate || String(tractor.id || "").slice(0, 8)
+    : "";
+  const trailerLabel = trailer
+    ? trailer.code || trailer.plate || String(trailer.id || "").slice(0, 8)
+    : "";
+  const driverNames = Array.isArray(job?.driverIds)
+    ? job.driverIds
+        .map((id) => getDriver(id))
+        .filter(Boolean)
+        .map((d) => d.name)
+    : [];
 
   const saveInline = () => {
     if (!onUpdate) {
@@ -311,9 +337,9 @@ const JobCard = ({
     <div
       onClick={() => onOpen && onOpen()}
       ref={setNodeRef}
-      className={`relative border ${bgClass} rounded-xl p-3 shadow-sm hover:shadow-md transition-all cursor-pointer text-xs sm:text-[13px] min-h-[60px] ${
-        isOver ? "bg-blue-50 border-2 border-blue-300 border-dashed" : ""
-      }`}
+      className={`relative border ${bgClass} rounded-xl shadow-sm hover:shadow-md transition-all cursor-pointer ${
+        isDayList ? "p-4 text-sm sm:text-sm min-h-[96px]" : "p-3 text-xs sm:text-[13px] min-h-[60px]"
+      } ${isOver ? "bg-blue-50 border-2 border-blue-300 border-dashed" : ""}`}
     >
       {/* status dot */}
       <span
@@ -323,7 +349,7 @@ const JobCard = ({
       {/* Header: Client + actions */}
       <div className="flex items-start justify-between gap-2 mb-1">
         <div className="flex-1 min-w-0 pl-3">
-          <h4 className="font-semibold text-gray-900 truncate text-sm">
+          <h4 className={`font-semibold text-gray-900 ${isDayList ? "text-base" : "text-sm"} truncate`}>
             {job.client || "New Client"}
           </h4>
           <div className="mt-[2px] flex items-center gap-1 text-[11px] text-gray-600">
@@ -341,6 +367,31 @@ const JobCard = ({
               {segment.startsPrevDay ? `↩ Started ${segment.originalStartISO} ${segment.originalStartTime}` : null}
               {segment.startsPrevDay && segment.endsNextDay ? " • " : null}
               {segment.endsNextDay ? `↪ Ends ${segment.originalEndISO} ${segment.originalEndTime}` : null}
+            </div>
+          ) : null}
+
+          {isDayList ? (
+            <div className="mt-2 space-y-1 pl-3">
+              {(pickupLabel || dropoffLabel) ? (
+                <div className="flex items-center gap-1 text-[12px] text-gray-700 min-w-0">
+                  <MapPin size={12} />
+                  <span className="truncate">
+                    {pickupLabel || "—"} {dropoffLabel ? "→" : ""} {dropoffLabel || ""}
+                  </span>
+                </div>
+              ) : null}
+
+              <div className="flex flex-wrap gap-1">
+                {tractorLabel ? (
+                  <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-800 text-[11px]">🚚 {tractorLabel}</span>
+                ) : null}
+                {trailerLabel ? (
+                  <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-800 text-[11px]">🛞 {trailerLabel}</span>
+                ) : null}
+                {driverNames?.length ? (
+                  <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-800 text-[11px]">👤 {driverNames.join(", ")}</span>
+                ) : null}
+              </div>
             </div>
           ) : null}
         </div>

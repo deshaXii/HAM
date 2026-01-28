@@ -58,10 +58,6 @@ export default function DayTimelineView({
   const [viewFilter, setViewFilter] = useState("all");
 
   const TOTAL_MINUTES = 24 * 60;
-  const MIN_WIDTH_PCT = 7;
-  const LANE_HEIGHT = 10;
-  const LANE_GAP = 70;
-  const MIN_TIMELINE_HEIGHT = 960;
 
   // 1) فلترة الشغلانات على اليوم + فلاتر resources
   // Include jobs that overlap this day (overnight / multi-day)
@@ -97,8 +93,8 @@ export default function DayTimelineView({
     visibleJobs = visibleJobs.filter((x) => slotForMinutes(x.seg.startMinutes) === "night");
   }
 
-  const unscheduledJobs = visibleJobs.filter((job) => isUnscheduled(job));
-  const scheduledJobs = visibleJobs.filter((x) => !isUnscheduled(x));
+  const unscheduledItems = visibleJobs.filter((x) => isUnscheduled(x));
+  const scheduledItemsRaw = visibleJobs.filter((x) => !isUnscheduled(x));
 
   const humanDateLabel = new Date(date).toLocaleDateString("en-US", {
     weekday: "long",
@@ -107,51 +103,43 @@ export default function DayTimelineView({
     day: "numeric",
   });
 
-  // 3) meta للي عندهم وقت بس
-  const jobsWithMeta = useMemo(() => {
-    const items = scheduledJobs
+  function slotKeyForMinutes(mins) {
+    const m = Math.max(0, Math.min(TOTAL_MINUTES - 1, mins || 0));
+    const h = Math.floor(m / 60);
+    const slot = TIME_SLOTS.find((s) => h >= s.startHour && h < s.endHour);
+    return slot?.key || TIME_SLOTS[0].key;
+  }
+
+  // 3) Prepare scheduled items (UI only)
+  const scheduledItems = useMemo(() => {
+    return scheduledItemsRaw
       .map(({ job, seg }) => {
-                const startMinutes = Math.min(seg.startMinutes || 0, TOTAL_MINUTES);
-                let endMinutes = Math.min(seg.endMinutes || startMinutes + 60, TOTAL_MINUTES);
-        let durationMinutes = Math.max(1, endMinutes - startMinutes);
-
-        let widthPct = ((endMinutes - startMinutes) / TOTAL_MINUTES) * 100;
-        if (widthPct < MIN_WIDTH_PCT) widthPct = MIN_WIDTH_PCT;
-
-        const leftPct = (startMinutes / TOTAL_MINUTES) * 100;
-
+        const startMinutes = Math.max(0, Math.min(TOTAL_MINUTES, seg?.startMinutes ?? 0));
+        const endMinutes = Math.max(0, Math.min(TOTAL_MINUTES, seg?.endMinutes ?? startMinutes));
         return {
           job,
           seg,
           startMinutes,
           endMinutes,
-          leftPct,
-          widthPct,
+          slotKey: slotKeyForMinutes(startMinutes),
         };
       })
       .sort((a, b) => a.startMinutes - b.startMinutes);
+  }, [scheduledItemsRaw, date]);
 
-    const lanesLastEnd = [];
-    items.forEach((item) => {
-      let laneIndex = 0;
-
-      for (; laneIndex < lanesLastEnd.length; laneIndex++) {
-        if (item.startMinutes >= (lanesLastEnd[laneIndex] || 0)) {
-          break;
-        }
-      }
-      lanesLastEnd[laneIndex] = item.endMinutes;
-      item.lane = laneIndex;
-    });
-
-    const laneCount = lanesLastEnd.length || 1;
-    const computedHeight = laneCount * LANE_HEIGHT + (laneCount - 1) * LANE_GAP;
-    const timelineHeight = Math.max(MIN_TIMELINE_HEIGHT, computedHeight);
-
-    return { items, laneCount, timelineHeight };
-  }, [scheduledJobs]);
-
-  const { items: metaItems, timelineHeight } = jobsWithMeta;
+  const slotRows = useMemo(() => {
+    const grouped = new Map(TIME_SLOTS.map((s) => [s.key, []]));
+    for (const it of scheduledItems) {
+      if (!grouped.has(it.slotKey)) grouped.set(it.slotKey, []);
+      grouped.get(it.slotKey).push(it);
+    }
+    // Keep start-time order inside each slot
+    for (const [k, arr] of grouped) {
+      arr.sort((a, b) => a.startMinutes - b.startMinutes);
+      grouped.set(k, arr);
+    }
+    return TIME_SLOTS.map((slot) => ({ slot, items: grouped.get(slot.key) || [] }));
+  }, [scheduledItems]);
 
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
@@ -192,19 +180,19 @@ export default function DayTimelineView({
       </div>
 
       {/* Unassigned / No-time lane */}
-      {unscheduledJobs.length > 0 && (
+      {unscheduledItems.length > 0 && (
         <div className="mb-5 rounded-lg border border-dashed border-gray-300 bg-gray-50/70 p-3">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium text-gray-700">
               Unassigned / no-time jobs
             </span>
             <span className="text-[11px] text-gray-500">
-              {unscheduledJobs.length} job
-              {unscheduledJobs.length > 1 ? "s" : ""}
+              {unscheduledItems.length} job
+              {unscheduledItems.length > 1 ? "s" : ""}
             </span>
           </div>
           <div className="flex flex-wrap gap-3">
-            {unscheduledJobs.map((job) => (
+            {unscheduledItems.map(({ job, seg }) => (
               <div
                 key={job.id}
                 className="w-full sm:w-[260px] lg:w-[280px] max-w-full"
@@ -227,81 +215,58 @@ export default function DayTimelineView({
         </div>
       )}
 
-      {/* Slot headers (00-04, 04-08, ...) */}
-      <div className="grid grid-cols-6 gap-0 mb-3 sticky top-[15px] z-50">
-        {TIME_SLOTS.map((slot, idx) => (
-          <div
-            key={slot.key}
-            className={`flex items-center justify-between px-3 py-2 text-xs bg-gray-50 border border-gray-200 border-r-0 last:border-r ${
-              idx === 0
-                ? "rounded-l-lg"
-                : idx === TIME_SLOTS.length - 1
-                ? "rounded-r-lg"
-                : ""
-            }`}
-          >
-            <span className="font-medium text-gray-700">{slot.label}</span>
-            {isAdmin && (
-              <button
-                onClick={() => onAddJobSlot(date, slot.key)}
-                className="p-1 hover:bg-gray-100 rounded transition-colors text-gray-500 hover:text-gray-700"
-                title="Add job in this time slot"
-              >
-                <Plus size={14} />
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {/* Timeline body */}
-      <div className="relative">
-        {/* خلفية الأعمدة + drop zones */}
-        <div className="absolute inset-0 grid grid-cols-6 gap-0">
-          {TIME_SLOTS.map((slot, idx) => (
+      {/* Day slots (time on the left, jobs stacked full-width on the right) */}
+      <div className="rounded-lg border border-gray-200 overflow-hidden">
+        <div className="max-h-[70vh] overflow-y-auto">
+          {slotRows.map(({ slot, items }, idx) => (
             <div
               key={slot.key}
-              className={`relative bg-gray-50 border border-gray-200 border-t-0 border-r-0 last:border-r ${
-                idx === 0
-                  ? "rounded-bl-lg"
-                  : idx === TIME_SLOTS.length - 1
-                  ? "rounded-br-lg"
-                  : ""
+              className={`grid grid-cols-[140px_1fr] gap-0 ${
+                idx === 0 ? "" : "border-t border-gray-200"
               }`}
             >
-              <div className="absolute inset-0 px-2 pt-3 pb-4">
+              <div className="bg-gray-50 px-3 py-3 text-xs flex items-center justify-between">
+                <div className="font-medium text-gray-700">{slot.label}</div>
+                {isAdmin && (
+                  <button
+                    onClick={() => onAddJobSlot(date, slot.key)}
+                    className="p-1 hover:bg-gray-100 rounded transition-colors text-gray-500 hover:text-gray-700"
+                    title="Add job in this time slot"
+                  >
+                    <Plus size={14} />
+                  </button>
+                )}
+              </div>
+
+              <div className="bg-white px-3 py-3">
                 <TimeSlotDropZone date={date} slotKey={slot.key}>
-                  <div style={{ height: timelineHeight }} />
+                  <div className="space-y-3">
+                    {items.length === 0 ? (
+                      <div className="text-[11px] text-gray-400 px-2 py-4">
+                        No jobs in this slot
+                      </div>
+                    ) : (
+                      items.map((it) => (
+                        <div key={it.job.id} className="w-full">
+                          <JobCard
+                            job={it.job}
+                            segment={it.seg}
+                            resources={state}
+                            isAdmin={isAdmin}
+                            variant="day-list"
+                            onOpen={() => onOpenJob(it.job.id)}
+                            onDelete={(jobId) => onDeleteJob(jobId)}
+                            onUpdate={(jobId, data) => onUpdateJob(jobId, data)}
+                            onDuplicate={(jobId) =>
+                              onDuplicateJob && onDuplicateJob(jobId)
+                            }
+                          />
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </TimeSlotDropZone>
               </div>
-            </div>
-          ))}
-        </div>
-
-        {/* الـ Events نفسها (overlay فوق الأعمدة) */}
-        <div
-          className="relative pointer-events-none"
-          style={{ height: timelineHeight }}
-        >
-          {metaItems.map((item) => (
-            <div
-              key={item.job.id}
-              className="absolute pointer-events-auto px-1"
-              style={{
-                left: `${item.leftPct}%`,
-                width: `${item.widthPct}%`,
-                top: `${item.lane * (LANE_HEIGHT + LANE_GAP)}px`,
-              }}
-            >
-              <JobCard
-                job={item.job}
-                resources={state}
-                isAdmin={isAdmin}
-                onOpen={() => onOpenJob(item.job.id)}
-                onDelete={(jobId) => onDeleteJob(jobId)}
-                onUpdate={(jobId, data) => onUpdateJob(jobId, data)}
-                onDuplicate={(jobId) => onDuplicateJob && onDuplicateJob(jobId)}
-              />
             </div>
           ))}
         </div>

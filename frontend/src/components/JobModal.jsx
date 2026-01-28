@@ -15,6 +15,38 @@ function toLocationNameArray(locations) {
   return locations.map((l) => (typeof l === "string" ? l : l.name));
 }
 
+function timeToMinutes(t) {
+  if (!t) return 0;
+  const [hh, mm] = String(t).split(":");
+  const h = Number(hh || 0);
+  const m = Number(mm || 0);
+  return h * 60 + m;
+}
+
+function minutesToTime(mins) {
+  const m = ((mins % (24 * 60)) + (24 * 60)) % (24 * 60);
+  const hh = String(Math.floor(m / 60)).padStart(2, "0");
+  const mm = String(m % 60).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function addHoursToTime(start, hours) {
+  const base = timeToMinutes(start);
+  const add = Math.round((Number(hours || 0) * 60) / 1); // minutes
+  return minutesToTime(base + add);
+}
+
+function durationFromStartEnd(start, end) {
+  const s = timeToMinutes(start);
+  const e = timeToMinutes(end);
+  let diff = e - s;
+  // If end is "earlier" than start, it's an overnight job.
+  if (diff < 0) diff += 24 * 60;
+  // keep to 0.5h steps like before
+  const hours = diff / 60;
+  return Math.max(0, Math.round(hours * 2) / 2);
+}
+
 export default function JobModal({
   job,
   drivers,
@@ -42,6 +74,13 @@ export default function JobModal({
   }, [job]);
 
   const locationNames = toLocationNameArray(locations);
+
+  // UI wants Start + End time, but we keep saving durationHours for backwards-compat.
+  const endTime = useMemo(() => {
+    return addHoursToTime(form.start || "08:00", Number(form.durationHours || 0));
+  }, [form.start, form.durationHours]);
+
+  // endTime is derived from start + durationHours.
 
   const set = (key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -155,17 +194,17 @@ export default function JobModal({
                 </label>
                 <label className="block">
                   <span className="block text-[11px] font-medium text-gray-600 mb-1">
-                    Duration (hours)
+                    End Time
                   </span>
                   <input
-                    type="number"
-                    step="0.5"
-                    min="0"
+                    type="time"
                     className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={form.durationHours || 0}
-                    onChange={(e) =>
-                      set("durationHours", parseFloat(e.target.value) || 0)
-                    }
+                    value={endTime}
+                    onChange={(e) => {
+                      const end = e.target.value;
+                      const dur = durationFromStartEnd(form.start || "08:00", end);
+                      set("durationHours", dur);
+                    }}
                     disabled={!isAdmin}
                   />
                 </label>
@@ -277,19 +316,13 @@ export default function JobModal({
                 <label className="block text-[11px] font-medium text-gray-600 mb-1">
                   Start Point
                 </label>
-                <select
+                <input
                   className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   value={form.startPoint || ""}
                   onChange={(e) => set("startPoint", e.target.value)}
                   disabled={startDisabled}
-                >
-                  <option value="">Select...</option>
-                  {locationNames.map((loc) => (
-                    <option key={loc} value={loc}>
-                      {loc}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Type start point..."
+                />
                 {lastTractorEnd && (
                   <div className="text-[11px] text-gray-500 mt-1">
                     Last tractor location:{" "}
@@ -326,19 +359,13 @@ export default function JobModal({
                 <label className="block text-[11px] font-medium text-gray-600 mb-1">
                   End Point
                 </label>
-                <select
+                <input
                   className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   value={form.endPoint || ""}
                   onChange={(e) => set("endPoint", e.target.value)}
                   disabled={!isAdmin}
-                >
-                  <option value="">Select...</option>
-                  {locationNames.map((loc) => (
-                    <option key={loc} value={loc}>
-                      {loc}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Type end point..."
+                />
               </div>
             </div>
           </div>
