@@ -1,7 +1,6 @@
 import React from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { labelsFor } from "../constants/trailerTaxonomy";
-import { resolveDriverPhotoUrl } from "../lib/photoUrl";
 
 // يرجّع كل الـ jobs اللي فيها المورد ده
 function getAssignedJobsForResource(jobs, type, resourceId) {
@@ -204,7 +203,7 @@ function DraggableResource({
             {isDriver ? (
               resource.photoUrl ? (
                 <img
-                  src={resolveDriverPhotoUrl(resource.photoUrl)}
+                  src={resource.photoUrl}
                   alt={resource.name || "driver"}
                   className="h-8 w-8 rounded-full object-cover border border-gray-200 flex-shrink-0"
                 />

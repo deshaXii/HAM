@@ -55,6 +55,55 @@ export async function apiMe() {
 
 let __plannerLastState = null;
 
+// ---------------- Job normalization (server <-> UI) ----------------
+// Server historically returns slot as a number (often 0), while the UI uses "day" | "night".
+// If we diff raw server jobs vs UI jobs, EVERY job looks "changed" and we end up batching the whole week.
+// That can surface unrelated validation errors and block saving.
+function normalizeJobSlotFromStart(start) {
+  const hour = parseInt(String(start || "0").split(":")[0] || "0", 10);
+  return hour >= 20 || hour < 8 ? "night" : "day";
+}
+
+function normalizeJob(job) {
+  const j = { ...(job || {}) };
+
+  // IDs sometimes arrive with accidental whitespace
+  if (typeof j.id === "string") j.id = j.id.trim();
+
+  // Slot normalization
+  if (j.slot !== "day" && j.slot !== "night") {
+    j.slot = normalizeJobSlotFromStart(j.start);
+  }
+
+  // Normalize nullable IDs
+  if (j.tractorId === "") j.tractorId = null;
+  if (j.trailerId === "") j.trailerId = null;
+
+  // DriverIds should always be an array
+  if (!Array.isArray(j.driverIds)) j.driverIds = [];
+
+  // Pricing normalization (avoid "" causing churn)
+  if (j.pricing && typeof j.pricing === "object") {
+    const v = j.pricing.value;
+    if (v === "") j.pricing.value = 0;
+    if (typeof j.pricing.value === "string" && j.pricing.value.trim() !== "") {
+      const num = Number(j.pricing.value);
+      if (Number.isFinite(num)) j.pricing.value = num;
+    }
+  }
+
+  // Financials numeric normalization
+  for (const k of ["revenueTrip", "costDriver", "costTruck", "costDiesel"]) {
+    if (j[k] === "") j[k] = 0;
+    if (typeof j[k] === "string") {
+      const num = Number(j[k]);
+      if (Number.isFinite(num)) j[k] = num;
+    }
+  }
+
+  return j;
+}
+
 async function fetchJson(url, opts = {}) {
   const res = await fetch(url, opts);
 
@@ -187,7 +236,7 @@ export async function apiGetState() {
     drivers: driversR?.drivers || [],
     tractors: tractorsR?.tractors || [],
     trailers: trailersR?.trailers || [],
-    jobs: jobsR?.jobs || [],
+    jobs: (jobsR?.jobs || []).map(normalizeJob),
     locations: locationsR?.locations || [],
     distanceKm: distancesR?.distanceKm || {},
     agenda: agendaR?.agenda || [], // ✅ NEW
@@ -218,7 +267,10 @@ export async function apiSaveState(nextState) {
     tractors: safeList(nextState.tractors, prev.tractors),
     trailers: safeList(nextState.trailers, prev.trailers),
     locations: safeList(nextState.locations, prev.locations),
-    jobs: safeList(nextState.jobs, prev.jobs),
+    jobs: safeList(
+      Array.isArray(nextState.jobs) ? nextState.jobs.map(normalizeJob) : [],
+      prev.jobs
+    ),
     agenda: safeList(nextState.agenda, prev.agenda),
   };
 
@@ -398,22 +450,22 @@ export async function apiSaveState(nextState) {
         const r = await doDelete(
           `${BASE}/jobs/${encodeURIComponent(d.deletes[0])}`
         );
-        if (r?.jobs) current.jobs = r.jobs;
+        if (r?.jobs) current.jobs = r.jobs.map(normalizeJob);
       } else if (d.creates.length === 1) {
         const r = await doPost(`${BASE}/jobs`, { job: d.creates[0] });
-        if (r?.jobs) current.jobs = r.jobs;
+        if (r?.jobs) current.jobs = r.jobs.map(normalizeJob);
       } else if (d.updates.length === 1) {
         const u = d.updates[0];
         const r = await doPatch(`${BASE}/jobs/${encodeURIComponent(u.id)}`, {
           job: u.item,
         });
-        if (r?.jobs) current.jobs = r.jobs;
+        if (r?.jobs) current.jobs = r.jobs.map(normalizeJob);
       }
     } else if (totalChanges > 1) {
       const upserts = [...d.creates, ...d.updates.map((u) => u.item)];
       const deletes = d.deletes;
       const r = await doPost(`${BASE}/jobs/batch`, { upserts, deletes });
-      if (r?.jobs) current.jobs = r.jobs;
+      if (r?.jobs) current.jobs = r.jobs.map(normalizeJob);
     }
   }
 
@@ -721,7 +773,11 @@ export async function apiDeleteLocation(id) {
 }
 export async function apiDeleteJob(id) {
   return doExplicitDelete(`${BASE}/jobs/${encodeURIComponent(id)}`, (r) => {
-    if (r?.jobs) __plannerLastState = { ...__plannerLastState, jobs: r.jobs };
+    if (r?.jobs)
+      __plannerLastState = {
+        ...__plannerLastState,
+        jobs: r.jobs.map(normalizeJob),
+      };
   });
 }
 export async function apiDeleteAgendaItem(id) {
