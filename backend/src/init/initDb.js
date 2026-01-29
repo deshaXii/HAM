@@ -319,6 +319,10 @@ async function ensureNormalizedPlannerTables() {
       id VARCHAR(64) PRIMARY KEY,
       date DATE NOT NULL,
       start VARCHAR(10),
+      end_date DATE NULL,
+      end_time VARCHAR(10) NULL,
+      code VARCHAR(80) NULL,
+      color VARCHAR(20) NULL,
       slot INT DEFAULT 0,
       client VARCHAR(200),
       pickup VARCHAR(200),
@@ -371,6 +375,21 @@ async function ensureNormalizedPlannerTables() {
       `ALTER TABLE jobs ADD COLUMN cost_diesel DECIMAL(10,2) NOT NULL DEFAULT 0`
     );
   }
+
+// Extra optional scheduling & display fields (end date/time + admin code + card color)
+if (!jobCols.has("end_date")) {
+  await tryQuery(`ALTER TABLE jobs ADD COLUMN end_date DATE NULL`);
+}
+if (!jobCols.has("end_time")) {
+  await tryQuery(`ALTER TABLE jobs ADD COLUMN end_time VARCHAR(10) NULL`);
+}
+if (!jobCols.has("code")) {
+  await tryQuery(`ALTER TABLE jobs ADD COLUMN code VARCHAR(80) NULL`);
+}
+if (!jobCols.has("color")) {
+  await tryQuery(`ALTER TABLE jobs ADD COLUMN color VARCHAR(20) NULL`);
+}
+
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS job_drivers (

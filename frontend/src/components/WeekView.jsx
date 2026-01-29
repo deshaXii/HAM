@@ -3,7 +3,7 @@ import React from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { Plus, AlertTriangle } from "lucide-react";
 import { Link } from "react-router-dom";
-import { labelsFor } from "../constants/trailerTaxonomy";
+// trailer type labels are intentionally not shown in the weekly job card
 import { getJobSegmentForDay } from "../lib/jobTime";
 import { jobShortKey } from "../lib/jobKey";
 
@@ -148,6 +148,53 @@ function SlotDroppable({ dateISO, slot, children, highlight = false }) {
 }
 
 /* ===== Job card (weekly) ===== */
+
+/** لون مخصص للكارد (خلفية كاملة) + Auto-contrast */
+function isValidHexColor(c) {
+  const s = String(c || "").trim();
+  return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(s);
+}
+function normalizeHex(hex) {
+  const s = String(hex || "").trim();
+  if (!isValidHexColor(s)) return null;
+  if (s.length === 4) {
+    return (
+      "#" +
+      s[1] + s[1] +
+      s[2] + s[2] +
+      s[3] + s[3]
+    ).toLowerCase();
+  }
+  return s.toLowerCase();
+}
+function hexToRgb(hex) {
+  const h = normalizeHex(hex);
+  if (!h) return null;
+  const n = parseInt(h.slice(1), 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+function relLuminance({ r, g, b }) {
+  const srgb = [r, g, b].map((v) => v / 255);
+  const lin = srgb.map((c) =>
+    c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+  );
+  return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+}
+function shouldUseLightText(hex) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return false;
+  const L = relLuminance(rgb);
+  const contrastWhite = 1.05 / (L + 0.05);
+  const contrastBlack = (L + 0.05) / 0.05;
+  return contrastWhite >= contrastBlack;
+}
+function getStateRing(job, warnings, seg) {
+  if (seg?.isMultiDay) return "ring-2 ring-purple-500/25";
+  if (isJobCompleted(job)) return "ring-2 ring-green-500/25";
+  if (Array.isArray(warnings) && warnings.length > 0) return "ring-2 ring-amber-500/25";
+  return "";
+}
+
 function JobCard({
   job,
   seg,
@@ -160,44 +207,78 @@ function JobCard({
   warnings = [],
 }) {
   const shortKey = jobShortKey(job.id);
-  const trailerTypes = trailer
-    ? Array.isArray(trailer.types)
-      ? trailer.types
-      : trailer.type
-      ? [trailer.type]
-      : []
-    : [];
-  const trailerTypeLabels = labelsFor(trailerTypes);
+
+  // NOTE: trailer "type" badges removed as requested (only show plate/code)
 
   const bgClass = getJobBgClass(job, warnings);
   const { setNodeRef, isOver } = useDroppable({ id: job.id });
 
   const start = job.start || (job.slot === "night" ? "20:00" : "08:00");
   const dur = job.durationHours || 0;
-  const pricing =
-    job.pricing?.type === "per_km"
-      ? `€ ${job.pricing.value || 0}/km`
-      : job.pricing?.type === "fixed"
-      ? "fixed"
-      : "";
+
+  const accentColor = isValidHexColor(job?.color) ? normalizeHex(job.color) : null;
+  const useAccentBg = !!accentColor && !isOver;
+  const useLightText = useAccentBg ? shouldUseLightText(accentColor) : false;
+
+  const tPrimary = useAccentBg
+    ? useLightText ? "text-white" : "text-gray-900"
+    : "text-gray-800";
+
+  const tSecondary = useAccentBg
+    ? useLightText ? "text-white/90" : "text-gray-800"
+    : "text-gray-500";
+
+  const badgeBase = useAccentBg
+    ? (useLightText ? "bg-white/15 text-white border border-white/25" : "bg-white/70 text-gray-800 border border-black/10")
+    : "bg-white/70 text-gray-700 border border-gray-200";
+
+  const chipOk = useAccentBg
+    ? (useLightText ? "bg-white/15 text-white" : "bg-white/70 text-gray-900")
+    : "bg-sky-50 text-sky-700";
+
+  const chipWarn = useAccentBg
+    ? (useLightText ? "bg-black/15 text-white" : "bg-white/70 text-orange-800")
+    : "bg-orange-50 text-orange-700";
+
+  const warnText = useAccentBg
+    ? (useLightText ? "text-white/95" : "text-orange-800")
+    : "text-orange-700";
 
   return (
     <div
       ref={setNodeRef}
-      className={`relative rounded-lg border shadow-sm p-3 mb-2 cursor-pointer transition-colors ${bgClass} ${seg?.isMultiDay ? "border-purple-300 bg-purple-50" : ""} ${
-        isOver ? "border-blue-400 ring-2 ring-blue-100" : ""
-      }`}
+      style={
+        useAccentBg
+          ? {
+              backgroundColor: accentColor,
+              borderColor: useLightText
+                ? "rgba(255,255,255,0.35)"
+                : "rgba(0,0,0,0.12)",
+            }
+          : undefined
+      }
+      className={[
+        "relative rounded-lg border shadow-sm p-3 mb-2 cursor-pointer transition-colors",
+        useAccentBg ? "" : bgClass,
+        getStateRing(job, warnings, seg),
+        isOver ? "border-blue-400 ring-2 ring-blue-100 bg-blue-50/60" : "",
+      ].join(" ")}
       onClick={() => onOpen(job.id)}
     >
       <div className="flex items-start justify-between gap-2 mb-1">
         <div
-          className="text-xs font-semibold text-gray-800 min-w-0"
+          className={`text-xs font-semibold min-w-0 ${tPrimary}`}
           title={`${job.client || "New Client"}${shortKey ? ` (#${shortKey})` : ""}`}
         >
           <div className="flex items-center gap-2 min-w-0">
             <span className="truncate">{job.client || "New Client"}</span>
+            {job?.code ? (
+              <span className={`shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-semibold ${badgeBase}`}>
+                {job.code}
+              </span>
+            ) : null}
             {shortKey ? (
-              <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-white/70 text-gray-700 text-[10px] font-semibold border border-gray-200">
+              <span className={`shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-semibold ${badgeBase}`}>
                 #{shortKey}
               </span>
             ) : null}
@@ -209,18 +290,24 @@ function JobCard({
               e.stopPropagation();
               onDelete(job.id);
             }}
-            className="text-[10px] text-red-500 hover:text-red-700"
+            className={useAccentBg ? (useLightText ? "text-white/80 hover:text-white" : "text-gray-700 hover:text-gray-900") : "text-[10px] text-red-500 hover:text-red-700"}
           >
             ×
           </button>
         )}
       </div>
 
-      <div className="text-[11px] text-gray-500 mb-1">
-        {seg ? `${seg.displayStart} → ${seg.displayEnd}` : start} • {seg ? `${Math.max(0, (seg.endMinutes - seg.startMinutes) / 60).toFixed(1).replace(/\.0$/, "")}h` : `${dur}h`}
+      <div className={`text-[11px] mb-1 ${tSecondary}`}>
+        {seg ? `${seg.displayStart} → ${seg.displayEnd}` : start} •{" "}
+        {seg
+          ? `${Math.max(0, (seg.endMinutes - seg.startMinutes) / 60)
+              .toFixed(1)
+              .replace(/\.0$/, "")}h`
+          : `${dur}h`}
       </div>
+
       {seg?.isMultiDay ? (
-        <div className="text-[10px] text-purple-700 mb-1">
+        <div className={`text-[10px] mb-1 ${useAccentBg ? (useLightText ? "text-white/90" : "text-purple-900") : "text-purple-700"}`}>
           {seg.startsPrevDay ? `↩ Started ${seg.originalStartISO} ${seg.originalStartTime}` : null}
           {seg.startsPrevDay && seg.endsNextDay ? " • " : null}
           {seg.endsNextDay ? `↪ Ends ${seg.originalEndISO} ${seg.originalEndTime}` : null}
@@ -229,75 +316,58 @@ function JobCard({
 
       <div className="flex flex-wrap gap-1 mb-1">
         {tractor ? (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 text-[10px]">
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] ${chipOk}`}>
             🚚 {tractor.code || tractor.plate || tractor.id}
           </span>
         ) : (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-50 text-orange-700 text-[10px]">
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] ${chipWarn}`}>
             <AlertTriangle size={10} /> Missing tractor
           </span>
         )}
 
         {trailer ? (
-          trailerTypeLabels.length ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px]">
-              🛞 {trailerTypeLabels.join(", ")}
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px]">
-              🛞 Trailer
-            </span>
-          )
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] ${chipOk}`}>
+            🧷 {trailer.code || trailer.plate || trailer.id}
+          </span>
         ) : (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-50 text-orange-700 text-[10px]">
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] ${chipWarn}`}>
             <AlertTriangle size={10} /> Missing trailer
           </span>
         )}
-      </div>
 
-      <div className="flex flex-wrap gap-1">
         {driverEntries && driverEntries.length > 0 ? (
-          driverEntries.map((d, idx) => (
+          driverEntries.map((d) => (
             <span
-              key={d.id || `${d.label}-${idx}`}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 text-[10px]"
+              key={d.id}
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] ${chipOk}`}
             >
-              👤 {d.label}
+              👤 {d.name}
             </span>
           ))
         ) : (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-50 text-orange-700 text-[10px]">
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] ${chipWarn}`}>
             <AlertTriangle size={10} /> Missing driver
           </span>
         )}
+
+        {/* Trailer type intentionally hidden */}
       </div>
 
-      {pricing ? (
-        <div className="mt-2 text-[10px] text-gray-400 border-t pt-1">
-          {pricing}
+      {/* warnings list */}
+      {warnings && warnings.length > 0 ? (
+        <div className="mt-1 space-y-1">
+          {warnings
+            // remove duplicated "Missing tractor/trailer/driver" since they're already shown as chips
+            .filter((w) => !["Missing tractor", "Missing trailer", "Missing driver"].includes(w))
+            .slice(0, 3)
+            .map((w, idx) => (
+            <div key={idx} className={`flex items-center gap-1 text-[11px] ${warnText}`}>
+              <AlertTriangle size={12} />
+              <span className="truncate">{w}</span>
+            </div>
+          ))}
         </div>
       ) : null}
-    </div>
-  );
-}
-
-/* (لو حبيت تستخدمها بعدين) */
-function StatusLegend() {
-  const items = [
-    ["incomplete", "Missing data"],
-    ["waiting", "Waiting"],
-    ["processed_soon", "Starting in <1h"],
-    ["processed", "In progress"],
-    ["complete", "Complete"],
-  ];
-  return (
-    <div className="flex flex-wrap gap-2 text-[10px] text-gray-600">
-      {items.map(([k, label]) => (
-        <span key={k} className="inline-flex items-center gap-1">
-          <span className={`w-2 h-2 rounded-full ${STATUS_COLORS[k]}`}></span>
-          {label}
-        </span>
-      ))}
     </div>
   );
 }
@@ -411,12 +481,12 @@ export default function WeekView({
                       const driverEntries = (job.driverIds || [])
                         .map((dId) => {
                           const d = state.drivers?.find(
-                            (d) => String(d.id) === String(dId)
+                            (dr) => String(dr.id) === String(dId)
                           );
                           return d
                             ? {
                                 id: String(d.id),
-                                label: d.name || d.code || String(d.id),
+                                name: d.name || d.code || String(d.id),
                               }
                             : null;
                         })
@@ -479,12 +549,12 @@ export default function WeekView({
                       const driverEntries = (job.driverIds || [])
                         .map((dId) => {
                           const d = state.drivers?.find(
-                            (d) => String(d.id) === String(dId)
+                            (dr) => String(dr.id) === String(dId)
                           );
                           return d
                             ? {
                                 id: String(d.id),
-                                label: d.name || d.code || String(d.id),
+                                name: d.name || d.code || String(d.id),
                               }
                             : null;
                         })

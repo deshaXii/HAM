@@ -112,7 +112,71 @@ function isJobCompleted(job) {
   return end.getTime() <= Date.now();
 }
 
-export function getJobBgClass(job, warnings) {
+export function isValidHexColor(c) {
+  const s = String(c || "").trim();
+  return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(s);
+}
+
+function normalizeHex(hex) {
+  const s = String(hex || "").trim();
+  if (!isValidHexColor(s)) return null;
+  if (s.length === 4) {
+    // #RGB -> #RRGGBB
+    return (
+      "#" +
+      s[1] + s[1] +
+      s[2] + s[2] +
+      s[3] + s[3]
+    ).toLowerCase();
+  }
+  return s.toLowerCase();
+}
+
+function hexToRgb(hex) {
+  const h = normalizeHex(hex);
+  if (!h) return null;
+  const n = parseInt(h.slice(1), 16);
+  return {
+    r: (n >> 16) & 255,
+    g: (n >> 8) & 255,
+    b: n & 255,
+  };
+}
+
+function relLuminance({ r, g, b }) {
+  // WCAG relative luminance
+  const srgb = [r, g, b].map((v) => v / 255);
+  const lin = srgb.map((c) =>
+    c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+  );
+  return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+}
+
+function shouldUseLightText(hex) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return false;
+  const L = relLuminance(rgb);
+  // compare contrast against white vs near-black
+  const contrastWhite = (1.05) / (L + 0.05);
+  const contrastBlack = (L + 0.05) / (0.05);
+  return contrastWhite >= contrastBlack;
+}
+
+function getJobStateRing(job, warnings) {
+  const hasWarnings = Array.isArray(warnings) && warnings.length > 0;
+
+  const overrideActive =
+    !!job?.startPoint &&
+    (job?.allowStartOverride ?? job?.overrideStart ?? false);
+
+  if (isJobCompleted(job)) return "ring-2 ring-green-500/30";
+  if (hasWarnings) return "ring-2 ring-amber-500/35";
+  if (overrideActive) return "ring-2 ring-red-500/35";
+  return "";
+}
+
+
+function getJobBgClass(job, warnings) {
   const hasWarnings = Array.isArray(warnings) && warnings.length > 0;
 
   const overrideActive =
@@ -208,6 +272,7 @@ const JobCard = ({
   };
 
   const bgClass = getJobBgClass(job, warnings);
+  const accentColor = isValidHexColor(job?.color) ? job.color : null;
 
   /* =========== EDIT MODE =========== */
   if (isEditing) {
@@ -335,36 +400,98 @@ const JobCard = ({
   const dropoffLabel = job.endPoint || job.dropoff || "End?";
   const shortKey = jobShortKey(job.id);
 
+  const useAccentBg = !!accentColor && !isOver;
+  const useLightText = useAccentBg ? shouldUseLightText(accentColor) : false;
+
+  const tPrimary = useAccentBg
+    ? useLightText
+      ? "text-white"
+      : "text-gray-900"
+    : "text-gray-900";
+
+  const tSecondary = useAccentBg
+    ? useLightText
+      ? "text-white/90"
+      : "text-gray-700"
+    : "text-gray-600";
+
+  const tMuted = useAccentBg
+    ? useLightText
+      ? "text-white/75"
+      : "text-gray-600"
+    : "text-gray-600";
+
+  const codeBadgeClass = useAccentBg
+    ? useLightText
+      ? "bg-white/20 text-white border border-white/30"
+      : "bg-white/70 text-gray-900 border border-black/10"
+    : "bg-indigo-50 text-indigo-800 border border-indigo-200";
+
+  const idBadgeClass = useAccentBg
+    ? useLightText
+      ? "bg-white/15 text-white border border-white/25"
+      : "bg-white/60 text-gray-800 border border-black/10"
+    : "bg-gray-100 text-gray-700 border border-gray-200";
+
+  const chipClass = useAccentBg
+    ? useLightText
+      ? "bg-white/15 text-white"
+      : "bg-white/70 text-gray-900"
+    : "bg-gray-100 text-gray-800";
+
+  const actionBtnBase = useAccentBg
+    ? useLightText
+      ? "p-1 text-white/85 hover:text-white rounded hover:bg-white/15"
+      : "p-1 text-gray-700 hover:text-gray-900 rounded hover:bg-black/5"
+    : null;
+
   return (
     <div
       onClick={() => onOpen && onOpen()}
       ref={setNodeRef}
-      className={`relative border ${bgClass} rounded-xl shadow-sm hover:shadow-md transition-all cursor-pointer ${
+      style={
+        useAccentBg
+          ? {
+              backgroundColor: accentColor,
+              borderColor: useLightText
+                ? "rgba(255,255,255,0.35)"
+                : "rgba(0,0,0,0.12)",
+            }
+          : undefined
+      }
+      className={`relative border ${useAccentBg ? getJobStateRing(job, warnings) : bgClass} rounded-xl shadow-sm hover:shadow-md transition-all cursor-pointer ${
         isDayList ? "p-4 text-sm sm:text-sm min-h-[96px]" : "p-3 text-xs sm:text-[13px] min-h-[60px]"
       } ${isOver ? "bg-blue-50 border-2 border-blue-300 border-dashed" : ""}`}
     >
       {/* status dot */}
       <span
-        className={`absolute top-2 left-2 w-2 h-2 rounded-full ${statusColor}`}
+        className={`absolute top-2 left-2 w-2 h-2 rounded-full ${statusColor} ${
+          useAccentBg ? (useLightText ? "ring-2 ring-white/60" : "ring-2 ring-black/20") : ""
+        }`}
       />
 
-      {/* Header: Client + actions */}
+{/* Header: Client + actions */}
       <div className="flex items-start justify-between gap-2 mb-1">
         <div className="flex-1 min-w-0 pl-3">
           <h4
-            className={`font-semibold text-gray-900 ${isDayList ? "text-base" : "text-sm"}`}
+            className={`font-semibold ${tPrimary} ${isDayList ? "text-base" : "text-sm"}`}
             title={`${job.client || "New Client"}${shortKey ? ` (#${shortKey})` : ""}`}
           >
             <div className="flex items-center gap-2 min-w-0">
               <span className="truncate">{job.client || "New Client"}</span>
+              {job?.code ? (
+                <span className={`shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-semibold ${codeBadgeClass}`}>
+                  {job.code}
+                </span>
+              ) : null}
               {shortKey ? (
-                <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-700 text-[10px] font-semibold border border-gray-200">
+                <span className={`shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-semibold ${idBadgeClass}`}>
                   #{shortKey}
                 </span>
               ) : null}
             </div>
           </h4>
-          <div className="mt-[2px] flex items-center gap-1 text-[11px] text-gray-600">
+          <div className={`mt-[2px] flex items-center gap-1 text-[11px] ${tSecondary}`}>
             <Clock size={12} />
             <span>{displayTimeRange || (job.start || "--:--")}</span>
             {job.durationHours ? (
@@ -375,7 +502,7 @@ const JobCard = ({
             ) : null}
           </div>
           {segment?.isMultiDay ? (
-            <div className="mt-1 text-[10px] text-purple-700 pl-3">
+            <div className={`mt-1 text-[10px] ${useAccentBg ? (useLightText ? "text-white/90" : "text-gray-800") : "text-purple-700"} pl-3`}>
               {segment.startsPrevDay ? `↩ Started ${segment.originalStartISO} ${segment.originalStartTime}` : null}
               {segment.startsPrevDay && segment.endsNextDay ? " • " : null}
               {segment.endsNextDay ? `↪ Ends ${segment.originalEndISO} ${segment.originalEndTime}` : null}
@@ -385,7 +512,7 @@ const JobCard = ({
           {isDayList ? (
             <div className="mt-2 space-y-1 pl-3">
               {(pickupLabel || dropoffLabel) ? (
-                <div className="flex items-center gap-1 text-[12px] text-gray-700 min-w-0">
+                <div className={`flex items-center gap-1 text-[12px] ${useAccentBg ? tSecondary : "text-gray-700"} min-w-0`}>
                   <MapPin size={12} />
                   <span className="truncate">
                     {pickupLabel || "—"} {dropoffLabel ? "→" : ""} {dropoffLabel || ""}
@@ -395,13 +522,13 @@ const JobCard = ({
 
               <div className="flex flex-wrap gap-1">
                 {tractorLabel ? (
-                  <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-800 text-[11px]">🚚 {tractorLabel}</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] ${chipClass}`}>🚚 {tractorLabel}</span>
                 ) : null}
                 {trailerLabel ? (
-                  <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-800 text-[11px]">🛞 {trailerLabel}</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] ${chipClass}`}>🛞 {trailerLabel}</span>
                 ) : null}
                 {driverNames?.length ? (
-                  <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-800 text-[11px]">👤 {driverNames.join(", ")}</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] ${chipClass}`}>👤 {driverNames.join(", ")}</span>
                 ) : null}
               </div>
             </div>
@@ -415,7 +542,7 @@ const JobCard = ({
                 e.stopPropagation();
                 onDuplicate && onDuplicate(job.id);
               }}
-              className="p-1 text-gray-400 hover:text-indigo-600 rounded hover:bg-indigo-50"
+              className={actionBtnBase || "p-1 text-gray-400 hover:text-indigo-600 rounded hover:bg-indigo-50"}
               title="Duplicate job"
             >
               <Copy size={14} />
@@ -425,7 +552,7 @@ const JobCard = ({
                 e.stopPropagation();
                 setIsEditing(true);
               }}
-              className="p-1 text-gray-400 hover:text-blue-600 rounded hover:bg-blue-50"
+              className={actionBtnBase || "p-1 text-gray-400 hover:text-blue-600 rounded hover:bg-blue-50"}
               title="Edit job"
             >
               <Edit2 size={14} />
@@ -437,7 +564,7 @@ const JobCard = ({
                   onDelete && onDelete(job.id);
                 }
               }}
-              className="p-1 text-gray-400 hover:text-red-600 rounded hover:bg-red-50"
+              className={actionBtnBase || "p-1 text-gray-400 hover:text-red-600 rounded hover:bg-red-50"}
               title="Delete job"
             >
               <Trash2 size={14} />
@@ -450,11 +577,11 @@ const JobCard = ({
 
       {/* Warnings (لسه متعطلة بالـ hidden لو حبيت تفعّلها بعدين) */}
       {warnings.length > 0 && (
-        <div className="mt-2 pt-2 border-t border-amber-100 pr-16 hidden">
+        <div className={`mt-2 pt-2 border-t ${useAccentBg ? (useLightText ? "border-white/20" : "border-black/10") : "border-amber-100"} pr-16 hidden`}>
           {warnings.map((w, i) => (
             <div
               key={i}
-              className="flex items-center gap-1 text-[11px] text-amber-700 mb-[2px]"
+              className={`flex items-center gap-1 text-[11px] ${useAccentBg ? (useLightText ? "text-white/90" : "text-amber-800") : "text-amber-700"} mb-[2px]`}
             >
               <AlertTriangle size={11} />
               <span className="truncate">{w}</span>

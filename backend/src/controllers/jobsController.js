@@ -75,6 +75,10 @@ function normalizeJobInput(jobIn) {
   const endPoint = safeStr(j.endPoint || j.end_point || "", 200);
   const allowStartOverride = !!(j.allowStartOverride ?? j.allow_start_override ?? j.overrideStart ?? false);
   const durationHours = safeNum(j.durationHours, 0);
+  const endDate = isoDateOnly(j.endDate || j.end_date) || null;
+  const endTime = safeStr(j.endTime || j.end_time || "", 10);
+  const code = safeStr(j.code || "", 80);
+  const color = safeStr(j.color || "", 20);
   const pricing = j.pricing || {};
   const pricingType = pricing.type === "fixed" ? "fixed" : "per_km";
   const pricingValue = safeNum(pricing.value, 0);
@@ -89,10 +93,28 @@ function normalizeJobInput(jobIn) {
     .map((x) => safeStr(x, 64).trim())
     .filter(Boolean);
 
+// compute duration from explicit end date/time if provided (supports multi-day jobs)
+// This allows end time minutes & different end day, while keeping duration_hours for planner calculations.
+let computedDurationHours = durationHours;
+if (endDate && endTime && start) {
+  const startDT = new Date(`${date}T${start}:00`);
+  const endDT = new Date(`${endDate}T${endTime}:00`);
+  if (!Number.isNaN(startDT.getTime()) && !Number.isNaN(endDT.getTime())) {
+    const diffMin = Math.round((endDT.getTime() - startDT.getTime()) / 60000);
+    if (diffMin >= 0) {
+      computedDurationHours = Math.round((diffMin / 60) * 100) / 100; // 2 decimals
+    }
+  }
+}
+
   return {
     id,
     date,
     start,
+    endDate,
+    endTime,
+    code,
+    color,
     slot,
     client,
     pickup,
@@ -100,7 +122,7 @@ function normalizeJobInput(jobIn) {
     startPoint,
     endPoint,
     allowStartOverride,
-    durationHours,
+    durationHours: computedDurationHours,
     pricingType,
     pricingValue,
     tractorId,
@@ -181,6 +203,10 @@ function mapJobRow(r, driverMap) {
     id: r.id,
     date: isoDateOnly(r.date) || isoDateOnly(new Date()),
     start: r.start || "",
+    endDate: isoDateOnly(r.end_date) || null,
+    endTime: r.end_time || "",
+    code: r.code || "",
+    color: r.color || "",
     slot: r.slot ?? 0,
     client: r.client || "",
     pickup: r.pickup || "",
@@ -203,7 +229,7 @@ function mapJobRow(r, driverMap) {
 
 async function selectJobs(conn = pool) {
   const [rows] = await conn.query(
-    `SELECT id, date, start, slot, client, pickup, dropoff, start_point, end_point, allow_start_override,
+    `SELECT id, date, start, end_date, end_time, code, color, slot, client, pickup, dropoff, start_point, end_point, allow_start_override,
             revenue_trip, cost_driver, cost_truck, cost_diesel,
             duration_hours, pricing_type, pricing_value, tractor_id, trailer_id, notes
      FROM jobs
@@ -227,7 +253,7 @@ async function selectJobs(conn = pool) {
 
 async function selectJobById(id, conn = pool) {
   const [rows] = await conn.query(
-    `SELECT id, date, start, slot, client, pickup, dropoff, start_point, end_point, allow_start_override,
+    `SELECT id, date, start, end_date, end_time, code, color, slot, client, pickup, dropoff, start_point, end_point, allow_start_override,
             revenue_trip, cost_driver, cost_truck, cost_diesel,
             duration_hours, pricing_type, pricing_value, tractor_id, trailer_id, notes
      FROM jobs
@@ -272,14 +298,18 @@ async function createJob(req, res) {
 
     await conn.query(
       `INSERT INTO jobs
-        (id, date, start, slot, client, pickup, dropoff, start_point, end_point, allow_start_override,
+        (id, date, start, end_date, end_time, code, color, slot, client, pickup, dropoff, start_point, end_point, allow_start_override,
          revenue_trip, cost_driver, cost_truck, cost_diesel,
          duration_hours, pricing_type, pricing_value, tractor_id, trailer_id, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         job.id,
         job.date,
         job.start,
+        job.endDate,
+        job.endTime || null,
+        job.code || null,
+        job.color || null,
         job.slot,
         job.client,
         job.pickup,
@@ -357,13 +387,17 @@ async function updateJob(req, res) {
 
     await conn.query(
       `UPDATE jobs
-       SET date=?, start=?, slot=?, client=?, pickup=?, dropoff=?, start_point=?, end_point=?, allow_start_override=?,
+       SET date=?, start=?, end_date=?, end_time=?, code=?, color=?, slot=?, client=?, pickup=?, dropoff=?, start_point=?, end_point=?, allow_start_override=?,
            revenue_trip=?, cost_driver=?, cost_truck=?, cost_diesel=?,
            duration_hours=?, pricing_type=?, pricing_value=?, tractor_id=?, trailer_id=?, notes=?
        WHERE id=? AND deleted_at IS NULL`,
       [
         job.date,
         job.start,
+        job.endDate,
+        job.endTime || null,
+        job.code || null,
+        job.color || null,
         job.slot,
         job.client,
         job.pickup,
@@ -502,15 +536,18 @@ async function batchJobs(req, res) {
       await assertTwoManRules(conn, j);
       await conn.query(
         `INSERT INTO jobs
-          (id, date, start, slot, client, pickup, dropoff,
+          (id, date, start, end_date, end_time, code, color, slot, client, pickup, dropoff,
            start_point, end_point, allow_start_override,
            revenue_trip, cost_driver, cost_truck, cost_diesel,
            duration_hours, pricing_type, pricing_value,
            tractor_id, trailer_id, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE
            date=VALUES(date),
            start=VALUES(start),
+           end_date=VALUES(end_date),
+           end_time=VALUES(end_time),
+           code=VALUES(code),
+           color=VALUES(color),
            slot=VALUES(slot),
            client=VALUES(client),
            pickup=VALUES(pickup),
@@ -532,6 +569,10 @@ async function batchJobs(req, res) {
           j.id,
           j.date,
           j.start,
+          j.endDate,
+          j.endTime || null,
+          j.code || null,
+          j.color || null,
           j.slot,
           j.client,
           j.pickup,

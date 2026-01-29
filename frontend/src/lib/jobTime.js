@@ -16,6 +16,12 @@ export function parseISODateLocal(iso) {
   return new Date(y || 1970, (m || 1) - 1, d || 1, 0, 0, 0, 0);
 }
 
+export function toISOTimeLocal(d) {
+  const h = String(d.getHours()).padStart(2, "0");
+  const m = String(d.getMinutes()).padStart(2, "0");
+  return `${h}:${m}`;
+}
+
 export function timeToMinutes(t) {
   if (!t) return 0;
   const [h, m] = String(t)
@@ -38,12 +44,25 @@ export function slotForMinutes(mins) {
 
 export function getJobInterval(job) {
   if (!job || !job.date || !job.start) return null;
-  const durH = Number(job.durationHours || 0);
-  if (!durH || durH <= 0) return null;
 
   const day = parseISODateLocal(job.date);
   const startM = timeToMinutes(job.start);
   const start = new Date(day.getTime() + startM * 60 * 1000);
+
+  // Preferred: explicit end date/time (supports multi-day & arbitrary minutes)
+  const hasExplicitEnd = job.endDate && job.endTime;
+  if (hasExplicitEnd) {
+    const endDay = parseISODateLocal(String(job.endDate).slice(0, 10));
+    const endM = timeToMinutes(job.endTime);
+    const end = new Date(endDay.getTime() + endM * 60 * 1000);
+    if (!Number.isNaN(end.getTime()) && end.getTime() >= start.getTime()) {
+      return { start, end };
+    }
+  }
+
+  // Fallback: duration hours
+  const durH = Number(job.durationHours || 0);
+  if (!durH || durH <= 0) return null;
   const end = new Date(start.getTime() + durH * 3600 * 1000);
   return { start, end };
 }
@@ -83,7 +102,7 @@ export function getJobSegmentForDay(job, dayISO) {
     originalStartISO,
     originalEndISO,
     originalStartTime: job.start,
-    originalEndTime: minutesToTime(timeToMinutes(job.start) + Math.round((Number(job.durationHours || 0) * 60))),
+    originalEndTime: toISOTimeLocal(new Date(end.getTime() - 1)),
     displayStart: minutesToTime(startMinutes),
     displayEnd: minutesToTime(endMinutes),
     displaySlot: slotForMinutes(startMinutes),

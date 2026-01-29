@@ -31,22 +31,42 @@ function minutesToTime(mins) {
   return `${hh}:${mm}`;
 }
 
-function addHoursToTime(start, hours) {
-  const base = timeToMinutes(start);
-  const add = Math.round((Number(hours || 0) * 60) / 1); // minutes
-  return minutesToTime(base + add);
+
+function addHoursToDateTime(dateISO, startTime, hours) {
+  // returns { endDate: 'YYYY-MM-DD', endTime: 'HH:MM' }
+  const [y, mo, d] = String(dateISO || "").slice(0, 10).split("-").map((n) => parseInt(n, 10));
+  if (!y || !mo || !d) return { endDate: dateISO || "", endTime: minutesToTime(timeToMinutes(startTime || "00:00")) };
+
+  const [hhStr, mmStr] = String(startTime || "00:00").split(":");
+  const hh = parseInt(hhStr || "0", 10);
+  const mm = parseInt(mmStr || "0", 10);
+
+  const base = new Date(y, (mo || 1) - 1, d || 1, hh || 0, mm || 0, 0, 0);
+  const durMs = (Number(hours || 0) * 60 * 60 * 1000);
+  const end = new Date(base.getTime() + durMs);
+
+  const endDate = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`;
+  const endTime = `${String(end.getHours()).padStart(2, "0")}:${String(end.getMinutes()).padStart(2, "0")}`;
+  return { endDate, endTime };
 }
 
-function durationFromStartEnd(start, end) {
-  const s = timeToMinutes(start);
-  const e = timeToMinutes(end);
-  let diff = e - s;
-  // If end is "earlier" than start, it's an overnight job.
-  if (diff < 0) diff += 24 * 60;
-  // keep to 0.5h steps like before
-  const hours = diff / 60;
-  return Math.max(0, Math.round(hours * 2) / 2);
+function durationHoursBetween(startDateISO, startTime, endDateISO, endTime) {
+  if (!startDateISO || !endDateISO || !startTime || !endTime) return 0;
+
+  const startDT = new Date(`${String(startDateISO).slice(0, 10)}T${startTime}:00`);
+  const endDT = new Date(`${String(endDateISO).slice(0, 10)}T${endTime}:00`);
+  if (Number.isNaN(startDT.getTime()) || Number.isNaN(endDT.getTime())) return 0;
+
+  const diffMin = Math.round((endDT.getTime() - startDT.getTime()) / 60000);
+  if (diffMin < 0) return -1;
+  return Math.round((diffMin / 60) * 100) / 100; // 2 decimals
 }
+
+function isValidHexColor(c) {
+  const s = String(c || "").trim();
+  return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(s);
+}
+
 
 export default function JobModal({
   job,
@@ -70,7 +90,8 @@ export default function JobModal({
   const driversRef = useRef(null);
   const routeRef = useRef(null);
   const financialRef = useRef(null);
-  const [form, setForm] = useState(() => ({
+  const [form, setForm] = useState(() => {
+  const base = {
     ...job,
     driverIds: Array.isArray(job.driverIds) ? job.driverIds : [],
     revenueTrip: job.revenueTrip ?? "",
@@ -79,20 +100,24 @@ export default function JobModal({
     costDiesel: job.costDiesel ?? "",
     // دعم بيانات قديمة عندها overrideStart بس
     allowStartOverride: job.allowStartOverride ?? job.overrideStart ?? false,
-  }));
+    code: job.code ?? "",
+    color: job.color ?? "",
+  };
+
+  const derived = addHoursToDateTime(base.date, base.start || "08:00", Number(base.durationHours || 0));
+  return {
+    ...base,
+    endDate: base.endDate || derived.endDate || base.date,
+    endTime: base.endTime || derived.endTime || "16:00",
+  };
+});
+
 
   const lastTractorEnd = useMemo(() => {
     return job._lastTractorEnd || null;
   }, [job]);
 
   const locationNames = toLocationNameArray(locations);
-
-  // UI wants Start + End time, but we keep saving durationHours for backwards-compat.
-  const endTime = useMemo(() => {
-    return addHoursToTime(form.start || "08:00", Number(form.durationHours || 0));
-  }, [form.start, form.durationHours]);
-
-  // endTime is derived from start + durationHours.
 
   const scrollToField = (field) => {
     const map = {
@@ -224,11 +249,23 @@ export default function JobModal({
     setSaveError("");
     setSaveErrorField("");
     setSaving(true);
-    try {
+try {
+  // validate explicit end date/time (allows multi-day)
+  const durCheck = durationHoursBetween(form.date, form.start || "08:00", form.endDate, form.endTime);
+  if (durCheck < 0) {
+    showError("time", "End date/time must be after Start time.");
+    setSaving(false);
+    return;
+  }
+  // keep durationHours synced with explicit end
+  const syncedForm = { ...form, durationHours: durCheck > 0 ? durCheck : Number(form.durationHours || 0) };
+
+
+
       const payload = {
-        ...form,
+        ...syncedForm,
         // خلي overrideStart دايمًا synced مع allowStartOverride
-        overrideStart: form.allowStartOverride,
+        overrideStart: syncedForm.allowStartOverride,
       };
       const res = await onSave(payload);
       if (res?.ok === false) {
@@ -303,7 +340,7 @@ export default function JobModal({
                 />
               </label>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <label className="block">
                   <span className="block text-[11px] font-medium text-gray-600 mb-1">
                     Start Time
@@ -312,28 +349,93 @@ export default function JobModal({
                     type="time"
                     className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     value={form.start || "08:00"}
-                    onChange={(e) => set("start", e.target.value)}
-                    disabled={!isAdmin}
-                  />
-                </label>
-                <label className="block">
-                  <span className="block text-[11px] font-medium text-gray-600 mb-1">
-                    End Time
-                  </span>
-                  <input
-                    type="time"
-                    className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={endTime}
                     onChange={(e) => {
-                      const end = e.target.value;
-                      const dur = durationFromStartEnd(form.start || "08:00", end);
-                      set("durationHours", dur);
+                      const v = e.target.value;
+                      const dur = durationHoursBetween(form.date, v, form.endDate, form.endTime);
+                      set("start", v);
+                      if (dur >= 0) set("durationHours", dur);
                     }}
                     disabled={!isAdmin}
                   />
                 </label>
+                <label className="block">
+  <span className="block text-[11px] font-medium text-gray-600 mb-1">
+    End Date
+  </span>
+  <input
+    type="date"
+    className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+    value={form.endDate || form.date}
+    onChange={(e) => {
+      const v = e.target.value;
+      set("endDate", v);
+      const dur = durationHoursBetween(form.date, form.start || "08:00", v, form.endTime);
+      if (dur >= 0) set("durationHours", dur);
+    }}
+    disabled={!isAdmin}
+  />
+</label>
+<label className="block">
+  <span className="block text-[11px] font-medium text-gray-600 mb-1">
+    End Time
+  </span>
+  <input
+    type="time"
+    className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+    value={form.endTime || "16:00"}
+    onChange={(e) => {
+      const v = e.target.value;
+      set("endTime", v);
+      const dur = durationHoursBetween(form.date, form.start || "08:00", form.endDate, v);
+      if (dur >= 0) set("durationHours", dur);
+    }}
+    disabled={!isAdmin}
+  />
+</label>
+
               </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                <label className="block">
+                  <span className="block text-[11px] font-medium text-gray-600 mb-1">
+                    Job Code
+                  </span>
+                  <input
+                    className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    value={form.code || ""}
+                    onChange={(e) => set("code", e.target.value)}
+                    disabled={!isAdmin}
+                    placeholder="e.g. AB12X9"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="block text-[11px] font-medium text-gray-600 mb-1">
+                    Card Color
+                  </span>
+                  {/* Color picker row: stay within section width */}
+                  <div className="flex items-center gap-2 w-full min-w-0">
+                    <input
+                      type="color"
+                      className="h-10 w-14 border rounded-md shrink-0 cursor-pointer"
+                      value={isValidHexColor(form.color) ? form.color : "#3B82F6"}
+                      onChange={(e) => set("color", e.target.value)}
+                      disabled={!isAdmin}
+                      title="Pick a color"
+                    />
+                    <input
+                      className="min-w-0 w-full border rounded-md px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      value={form.color || ""}
+                      onChange={(e) => set("color", e.target.value)}
+                      disabled={!isAdmin}
+                      placeholder="#RRGGBB"
+                    />
+                  </div>
+                </label>
+              </div>
+
             </div>
+
 
             {/* === 2) resources === */}
             <div className="bg-gray-50/50 rounded-lg p-3 border border-gray-100">
