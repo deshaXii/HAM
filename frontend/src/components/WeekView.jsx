@@ -206,6 +206,7 @@ function JobCard({
   trailer,
   warnings = [],
 }) {
+  console.log('driverEntries', driverEntries)
   const shortKey = jobShortKey(job.id);
   const trailerTypes = trailer
     ? Array.isArray(trailer.types)
@@ -346,7 +347,7 @@ function JobCard({
               key={d.id}
               className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] ${chipOk}`}
             >
-              👤 {d.name}
+              👤 {d.label}
             </span>
           ))
         ) : (
