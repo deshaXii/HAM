@@ -479,9 +479,9 @@ const JobCard = ({
           >
             <div className="flex items-center gap-2 min-w-0">
               <span className="truncate">{job.client || "New Client"}</span>
-              {job?.client ? (
+              {job?.code ? (
                 <span className={`shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-semibold ${codeBadgeClass}`}>
-                  {job.client}
+                  {job.code}
                 </span>
               ) : null}
               {shortKey ? (
