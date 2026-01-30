@@ -479,9 +479,9 @@ const JobCard = ({
           >
             <div className="flex items-center gap-2 min-w-0">
               <span className="truncate">{job.client || "New Client"}</span>
-              {job?.code ? (
+              {job?.client ? (
                 <span className={`shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-semibold ${codeBadgeClass}`}>
-                  {job.code}
+                  {job.client}
                 </span>
               ) : null}
               {shortKey ? (
@@ -576,7 +576,7 @@ const JobCard = ({
       {/* هنا لو حبيت ترجع الـ route / badges / pricing تاني، الكود موجود ومتعَلَّق فوق */}
 
       {/* Warnings (لسه متعطلة بالـ hidden لو حبيت تفعّلها بعدين) */}
-      {warnings.length > 0 && (
+      {/* {warnings.length > 0 && (
         <div className={`mt-2 pt-2 border-t ${useAccentBg ? (useLightText ? "border-white/20" : "border-black/10") : "border-amber-100"} pr-16 hidden`}>
           {warnings.map((w, i) => (
             <div
@@ -588,7 +588,7 @@ const JobCard = ({
             </div>
           ))}
         </div>
-      )}
+      )} */}
     </div>
   );
 };
