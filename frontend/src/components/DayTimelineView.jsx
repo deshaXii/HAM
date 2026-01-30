@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
-import { Plus } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, Calendar } from "lucide-react";
 import JobCard, { getJobWarnings } from "./JobCard";
 import { getJobSegmentForDay, slotForMinutes } from "../lib/jobTime";
 
@@ -54,6 +54,8 @@ export default function DayTimelineView({
   onDeleteJob,
   onDuplicateJob,
   onOpenJob,
+  onPrevDay,
+  onNextDay,
 }) {
   const [viewFilter, setViewFilter] = useState("all");
 
@@ -151,7 +153,34 @@ export default function DayTimelineView({
             Showing {visibleJobs.length} of {todaysJobs.length} jobs
           </p>
         </div>
-        <div className="text-sm text-gray-600">{humanDateLabel}</div>
+        {(onPrevDay || onNextDay) ? (
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              type="button"
+              onClick={onPrevDay}
+              className="p-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+              aria-label="Previous day"
+            >
+              <ChevronLeft size={16} />
+            </button>
+
+            <div className="flex items-center gap-2 text-sm font-medium text-gray-800 min-w-0">
+              <Calendar size={18} className="text-gray-600" />
+              <span className="truncate">{humanDateLabel}</span>
+            </div>
+
+            <button
+              type="button"
+              onClick={onNextDay}
+              className="p-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+              aria-label="Next day"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        ) : (
+          <div className="text-sm text-gray-600">{humanDateLabel}</div>
+        )}
       </div>
 
       {/* Quick filters */}

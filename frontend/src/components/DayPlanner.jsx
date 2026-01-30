@@ -14,7 +14,13 @@ import {
 } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import JobModal from "./JobModal";
-import { Truck, Users, Package, Calendar, MapPin, Search } from "lucide-react";
+import {
+  Truck,
+  Users,
+  Package,
+  MapPin,
+  Search,
+} from "lucide-react";
 import { apiGetState, apiSaveState } from "../lib/api";
 import { useAuth } from "../contexts/AuthContext";
 import ResourcePool from "./ResourcePool";
@@ -58,6 +64,27 @@ function startTimeFromSlotKey(slotKey) {
     flex: "08:00",
   };
   return map[slotKey] || "08:00";
+}
+
+function parseYMDToLocalDate(ymdStr) {
+  // Avoid UTC parsing quirks of new Date('YYYY-MM-DD')
+  const [y, m, d] = String(ymdStr || "")
+    .split("-")
+    .map((x) => parseInt(x, 10));
+  if (!y || !m || !d) return new Date();
+  const dt = new Date();
+  dt.setFullYear(y);
+  dt.setMonth(m - 1);
+  dt.setDate(d);
+  dt.setHours(0, 0, 0, 0);
+  return dt;
+}
+
+function formatLocalDateToYMD(dt) {
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, "0");
+  const d = String(dt.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 /* ==== resolve legacy short IDs → real UUIDs ==== */
@@ -614,6 +641,18 @@ export default function DayPlanner() {
     year: "numeric",
   });
 
+  const goPrevDay = () => {
+    const dt = parseYMDToLocalDate(date);
+    dt.setDate(dt.getDate() - 1);
+    navigate(`/day/${formatLocalDateToYMD(dt)}`);
+  };
+
+  const goNextDay = () => {
+    const dt = parseYMDToLocalDate(date);
+    dt.setDate(dt.getDate() + 1);
+    navigate(`/day/${formatLocalDateToYMD(dt)}`);
+  };
+
   let duplicateEndTime = "";
   if (duplicateJobConfig && duplicateJobConfig.start) {
     const startM = timeToMinutes(duplicateJobConfig.start);
@@ -640,34 +679,6 @@ export default function DayPlanner() {
           </p>
         </div>
       )}
-
-      <div className="bg-white border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-2">
-              <Calendar size={20} className="text-gray-600" />
-              <span className="font-semibold text-gray-900">
-                {dateReadable}
-              </span>
-            </div>
-            <div className="flex items-center gap-3">
-              {isAdmin ? (
-                <button
-                  style={{ display: "none" }}
-                  onClick={() => setShowDistanceEditor(true)}
-                  className="flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors border border-gray-300 text-sm"
-                >
-                  <MapPin size={18} /> Distances
-                </button>
-              ) : (
-                <div className="text-xs text-gray-500 bg-gray-100 rounded-lg px-3 py-2 border border-gray-200">
-                  Read Only
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
 
       <DndContext
         sensors={sensors}
@@ -729,6 +740,8 @@ export default function DayPlanner() {
                 date={date}
                 state={state}
                 isAdmin={isAdmin}
+                onPrevDay={goPrevDay}
+                onNextDay={goNextDay}
                 onAddJobSlot={addNewJobAtSlot}
                 onUpdateJob={updateJob}
                 onDeleteJob={deleteJob}

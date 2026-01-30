@@ -811,7 +811,11 @@ export default function Planner() {
         arr = arr.filter(
           (t) =>
             (t.code || "").toLowerCase().includes(q) ||
-            (t.type || "").toLowerCase().includes(q)
+            (t.plate || "").toLowerCase().includes(q) ||
+            (t.type || "").toLowerCase().includes(q) ||
+            (Array.isArray(t.types) ? t.types.join(" ") : "")
+              .toLowerCase()
+              .includes(q)
         );
       } else if (type === "driver") {
         arr = arr.filter(
@@ -851,36 +855,13 @@ export default function Planner() {
         </div>
       )}
 
+      {/*
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex flex-col gap-4">
         <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
           <div className="flex flex-row gap-3 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                onClick={goPrevWeek}
-                className="p-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <ChevronLeft size={16} />
-              </button>
-              <div className="flex items-center gap-2 font-semibold text-gray-800 text-sm">
-                <Calendar size={16} className="text-gray-500" />
-                <span>
-                  Week starting{" "}
-                  {currentWeekStart.toLocaleDateString(undefined, {
-                    year: "numeric",
-                    month: "short",
-                    day: "numeric",
-                  })}
-                </span>
-              </div>
-              <button
-                onClick={goNextWeek}
-                className="p-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <ChevronRight size={16} />
-              </button>
-            </div>
+            
 
-            <div className="relative max-w-xs">
+           <div className="relative max-w-xs">
               <Search
                 size={14}
                 className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400"
@@ -891,7 +872,7 @@ export default function Planner() {
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
-            </div>
+            </div> 
           </div>
 
           <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -909,7 +890,7 @@ export default function Planner() {
             )}
           </div>
         </div>
-      </div>
+      </div> */}
 
       <DndContext
         sensors={sensors}
@@ -917,10 +898,35 @@ export default function Planner() {
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        <div className="flex flex-col xl:flex-row gap-4">
+        <div className="flex flex-col xl:flex-row gap-4 ">
           {isAdmin && (
             <div className="w-full xl:w-[240px] flex-shrink-0 flex flex-col gap-4">
               <div className="sticky top-0 left-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden overflow-y-scroll h-[100vh] pt-2 pb-4 flex flex-col gap-4">
+                <div className="flex items-center gap-2 flex-wrap justify-between w-full">
+              <button
+                onClick={goPrevWeek}
+                className="p-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <div className="flex items-center gap-2 font-semibold text-gray-800 text-sm">
+                <Calendar size={16} className="text-gray-500" />
+                <span>
+                  {/* Week starting{" "} */}
+                  {currentWeekStart.toLocaleDateString(undefined, {
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                  })}
+                </span>
+              </div>
+              <button
+                onClick={goNextWeek}
+                className="p-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
                 <ResourcePool
                   title="Tractors"
                   icon={Truck}

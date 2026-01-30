@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { labelsFor } from "../constants/trailerTaxonomy";
 import { resolveDriverPhotoUrl } from "../lib/photoUrl";
@@ -145,15 +145,19 @@ function DraggableResource({
   const assignedJobs = getAssignedJobsForResource(jobs, type, resource.id);
   const jobCount = assignedJobs.length;
 
+  // ✅ عرض الـ Plate أولاً ثم الـ Code (مفيد جداً مع الداتا الكبيرة)
   let mainLabel =
     type === "driver"
       ? resource.name || "Unnamed Driver"
-      : resource.code || "No Code";
+      : resource.plate || resource.code || "No Plate";
 
   let subLabel = "";
-  if (type === "tractor")
-    subLabel = resource.plate || resource.currentLocation || "";
-  else if (type === "trailer") {
+  if (type === "tractor") {
+    const parts = [];
+    if (resource.plate && resource.code) parts.push(resource.code);
+    if (resource.currentLocation) parts.push(resource.currentLocation);
+    subLabel = parts.join(" • ");
+  } else if (type === "trailer") {
     const labels = labelsFor(
       Array.isArray(resource.types)
         ? resource.types
@@ -161,9 +165,11 @@ function DraggableResource({
         ? [resource.type]
         : []
     );
-    // المطلوب: عرض Plate للـ Trailers زي Tractors
-    // لو مفيش plate نرجع للـ labels (types) عشان مايبقاش السطر فاضي.
-    subLabel = resource.plate || resource.currentLocation || labels.join(", ");
+    const parts = [];
+    if (resource.plate && resource.code) parts.push(resource.code);
+    if (resource.currentLocation) parts.push(resource.currentLocation);
+    if (labels.length) parts.push(labels.join(", "));
+    subLabel = parts.filter(Boolean).join(" • ");
   } else if (type === "driver") {
     const flags = [];
     if (resource.canNight) flags.push("Night");
@@ -268,6 +274,35 @@ export default function ResourcePool({
   lockDateISO, // يُستخدم فقط مع lockMode="day"
 }) {
   const safeResources = Array.isArray(resources) ? resources : [];
+
+  // 🔎 per-section search (مهم جداً مع وجود 100+ عنصر)
+  const [q, setQ] = useState("");
+
+  const filteredResources = useMemo(() => {
+    const qq = q.trim().toLowerCase();
+    if (!qq) return safeResources;
+
+    if (type === "driver") {
+      return safeResources.filter(
+        (d) =>
+          (d.name || "").toLowerCase().includes(qq) ||
+          (d.code || "").toLowerCase().includes(qq)
+      );
+    }
+
+    // tractor / trailer
+    return safeResources.filter(
+      (t) =>
+        (t.plate || "").toLowerCase().includes(qq) ||
+        (t.code || "").toLowerCase().includes(qq)
+    );
+  }, [safeResources, q, type]);
+
+  const countLabel =
+    filteredResources.length === safeResources.length
+      ? `${safeResources.length} total`
+      : `${filteredResources.length} / ${safeResources.length}`;
+
   return (
     <div className="card p-4">
       <div className="flex items-center justify-between mb-3">
@@ -278,19 +313,41 @@ export default function ResourcePool({
           <div>
             <div className="text-sm font-semibold text-gray-800">{title}</div>
             <div className="text-[11px] text-gray-500 leading-tight">
-              {safeResources.length} total
+              {countLabel}
             </div>
           </div>
         </div>
       </div>
 
-      {safeResources.length === 0 ? (
+      {/* Search */}
+      <div className="relative mb-3">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder={
+            type === "driver" ? "Search name / code..." : "Search plate / code..."
+          }
+          className="w-full px-3 py-2 pr-10 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        {q ? (
+          <button
+            type="button"
+            onClick={() => setQ("")}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            title="Clear"
+          >
+            ✕
+          </button>
+        ) : null}
+      </div>
+
+      {filteredResources.length === 0 ? (
         <div className="text-xs text-gray-400 italic text-center py-6">
-          (empty)
+          (no results)
         </div>
       ) : (
-        <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1 tiny-scrollbar">
-          {safeResources.map((res) => (
+        <div className="space-y-2 h-[520px] overflow-y-auto pr-1 tiny-scrollbar">
+          {filteredResources.map((res) => (
             <DraggableResource
               key={res.id}
               resource={res}

@@ -105,6 +105,12 @@ export default function MultiTypeSelect({
 
   function chooseFlat(vVal) {
     // نعيده كـ ["value"] عشان يركب على تخزينك الحالي (array)
+    // لو ضغط على نفس الاختيار تاني: الغي الاختيار (deselect)
+    if (path[0] === vVal) {
+      onChange([]);
+      setOpen(false);
+      return;
+    }
     onChange([vVal]);
     setOpen(false);
   }
@@ -114,6 +120,12 @@ export default function MultiTypeSelect({
   }
 
   function chooseVariant(fVal, vVal) {
+    // لو ضغط على نفس الاختيار تاني: الغي الاختيار
+    if (path[0] === fVal && path[1] === vVal) {
+      onChange([]);
+      setOpen(false);
+      return;
+    }
     onChange([fVal, vVal]); // nested path
     setOpen(false);
   }

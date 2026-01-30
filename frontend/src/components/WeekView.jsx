@@ -3,7 +3,7 @@ import React from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { Plus, AlertTriangle } from "lucide-react";
 import { Link } from "react-router-dom";
-// trailer type labels are intentionally not shown in the weekly job card
+import { labelsFor } from "../constants/trailerTaxonomy";
 import { getJobSegmentForDay } from "../lib/jobTime";
 import { jobShortKey } from "../lib/jobKey";
 
@@ -207,8 +207,14 @@ function JobCard({
   warnings = [],
 }) {
   const shortKey = jobShortKey(job.id);
-
-  // NOTE: trailer "type" badges removed as requested (only show plate/code)
+  const trailerTypes = trailer
+    ? Array.isArray(trailer.types)
+      ? trailer.types
+      : trailer.type
+      ? [trailer.type]
+      : []
+    : [];
+  const trailerTypeLabels = labelsFor(trailerTypes);
 
   const bgClass = getJobBgClass(job, warnings);
   const { setNodeRef, isOver } = useDroppable({ id: job.id });
@@ -350,24 +356,29 @@ function JobCard({
           </span>
         )}
 
-        {/* Trailer type intentionally hidden */}
+        {trailerTypeLabels && trailerTypeLabels.length > 0 ? (
+          trailerTypeLabels.map((lbl) => (
+            <span
+              key={lbl}
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] ${badgeBase}`}
+            >
+              {lbl}
+            </span>
+          ))
+        ) : null}
       </div>
 
       {/* warnings list */}
-      {warnings && warnings.length > 0 ? (
+      {/* {warnings && warnings.length > 0 ? (
         <div className="mt-1 space-y-1">
-          {warnings
-            // remove duplicated "Missing tractor/trailer/driver" since they're already shown as chips
-            .filter((w) => !["Missing tractor", "Missing trailer", "Missing driver"].includes(w))
-            .slice(0, 3)
-            .map((w, idx) => (
+          {warnings.slice(0, 3).map((w, idx) => (
             <div key={idx} className={`flex items-center gap-1 text-[11px] ${warnText}`}>
               <AlertTriangle size={12} />
               <span className="truncate">{w}</span>
             </div>
           ))}
         </div>
-      ) : null}
+      ) : null} */}
     </div>
   );
 }
@@ -481,12 +492,12 @@ export default function WeekView({
                       const driverEntries = (job.driverIds || [])
                         .map((dId) => {
                           const d = state.drivers?.find(
-                            (dr) => String(dr.id) === String(dId)
+                            (d) => String(d.id) === String(dId)
                           );
                           return d
                             ? {
                                 id: String(d.id),
-                                name: d.name || d.code || String(d.id),
+                                label: d.name || d.code || String(d.id),
                               }
                             : null;
                         })
@@ -549,12 +560,12 @@ export default function WeekView({
                       const driverEntries = (job.driverIds || [])
                         .map((dId) => {
                           const d = state.drivers?.find(
-                            (dr) => String(dr.id) === String(dId)
+                            (d) => String(d.id) === String(dId)
                           );
                           return d
                             ? {
                                 id: String(d.id),
-                                name: d.name || d.code || String(d.id),
+                                label: d.name || d.code || String(d.id),
                               }
                             : null;
                         })

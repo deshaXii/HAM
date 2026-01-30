@@ -269,6 +269,10 @@ export default function Admin() {
   const [loading, setLoading] = useState(true);
   const [hasConflict, setHasConflict] = useState(false);
 
+  // Filters (Dashboard → Tractors/Trailers Management)
+  const [tractorSearch, setTractorSearch] = useState("");
+  const [trailerSearch, setTrailerSearch] = useState("");
+
   // tracking للتعديلات المحلية
   const isDirtyRef = useRef(false);
   const [isDirty, setIsDirty] = useState(false);
@@ -546,38 +550,53 @@ const deleteItem = async (type, id) => {
                 })
               }
             >
-              <div className="overflow-x-auto">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="relative flex-1">
+                  <input
+                    value={tractorSearch}
+                    onChange={(e) => setTractorSearch(e.target.value)}
+                    className="input-field text-xs md:text-sm w-full pr-9"
+                    placeholder="Search by plate or code…"
+                  />
+                  {tractorSearch?.trim() ? (
+                    <button
+                      type="button"
+                      onClick={() => setTractorSearch("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                      title="Clear"
+                    >
+                      <X size={16} />
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              {/* fixed-height section with internal scroll */}
+              <div className="overflow-x-auto overflow-y-auto max-h-[520px] rounded-lg border border-gray-200">
                 <table className="w-full text-xs md:text-sm">
-                  <thead className="bg-gray-50">
+                  <thead className="bg-gray-50 sticky top-0 z-10">
                     <tr>
-                      <Th>Code</Th>
                       <Th>Plate</Th>
+                      <Th>Code</Th>
                       <Th>Type(s)</Th>
                       <Th center>Double Manned</Th>
                       <Th right>Actions</Th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {(draft?.tractors || []).map((tractor) => (
+                    {(draft?.tractors || [])
+                      .filter((tractor) => {
+                        const q = tractorSearch.trim().toLowerCase();
+                        if (!q) return true;
+                        const plate = String(tractor.plate || "").toLowerCase();
+                        const code = String(tractor.code || "").toLowerCase();
+                        return plate.includes(q) || code.includes(q);
+                      })
+                      .map((tractor) => (
                       <tr
                         key={tractor.id}
                         className="hover:bg-gray-50 transition-colors"
                       >
-                        <Td>
-                          <input
-                            value={tractor.code}
-                            onChange={(e) =>
-                              updateDraftItem(
-                                "tractors",
-                                tractor.id,
-                                "code",
-                                e.target.value
-                              )
-                            }
-                            className="input-field text-xs md:text-sm"
-                            placeholder="Tractor code..."
-                          />
-                        </Td>
                         <Td>
                           <input
                             value={tractor.plate || ""}
@@ -591,6 +610,21 @@ const deleteItem = async (type, id) => {
                             }
                             className="input-field text-xs md:text-sm"
                             placeholder="License plate..."
+                          />
+                        </Td>
+                        <Td>
+                          <input
+                            value={tractor.code}
+                            onChange={(e) =>
+                              updateDraftItem(
+                                "tractors",
+                                tractor.id,
+                                "code",
+                                e.target.value
+                              )
+                            }
+                            className="input-field text-xs md:text-sm"
+                            placeholder="Tractor code..."
                           />
                         </Td>
                         <Td>
@@ -653,37 +687,52 @@ const deleteItem = async (type, id) => {
                 })
               }
             >
-              <div className="overflow-x-auto">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="relative flex-1">
+                  <input
+                    value={trailerSearch}
+                    onChange={(e) => setTrailerSearch(e.target.value)}
+                    className="input-field text-xs md:text-sm w-full pr-9"
+                    placeholder="Search by plate or code…"
+                  />
+                  {trailerSearch?.trim() ? (
+                    <button
+                      type="button"
+                      onClick={() => setTrailerSearch("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                      title="Clear"
+                    >
+                      <X size={16} />
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              {/* fixed-height section with internal scroll */}
+              <div className="overflow-x-auto overflow-y-auto max-h-[520px] rounded-lg border border-gray-200">
                 <table className="w-full text-xs md:text-sm">
-                  <thead className="bg-gray-50">
+                  <thead className="bg-gray-50 sticky top-0 z-10">
                     <tr>
-                      <Th>Code</Th>
                       <Th>Plate</Th>
+                      <Th>Code</Th>
                       <Th>Type(s)</Th>
                       <Th right>Actions</Th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {(draft.trailers || []).map((trailer) => (
+                    {(draft.trailers || [])
+                      .filter((trailer) => {
+                        const q = trailerSearch.trim().toLowerCase();
+                        if (!q) return true;
+                        const plate = String(trailer.plate || "").toLowerCase();
+                        const code = String(trailer.code || "").toLowerCase();
+                        return plate.includes(q) || code.includes(q);
+                      })
+                      .map((trailer) => (
                       <tr
                         key={trailer.id}
                         className="hover:bg-gray-50 transition-colors"
                       >
-                        <Td>
-                          <input
-                            value={trailer.code}
-                            onChange={(e) =>
-                              updateDraftItem(
-                                "trailers",
-                                trailer.id,
-                                "code",
-                                e.target.value
-                              )
-                            }
-                            className="input-field text-xs md:text-sm"
-                            placeholder="Trailer code..."
-                          />
-                        </Td>
                         <Td>
                           <input
                             value={trailer.plate || ""}
@@ -697,6 +746,21 @@ const deleteItem = async (type, id) => {
                             }
                             className="input-field text-xs md:text-sm"
                             placeholder="License plate..."
+                          />
+                        </Td>
+                        <Td>
+                          <input
+                            value={trailer.code}
+                            onChange={(e) =>
+                              updateDraftItem(
+                                "trailers",
+                                trailer.id,
+                                "code",
+                                e.target.value
+                              )
+                            }
+                            className="input-field text-xs md:text-sm"
+                            placeholder="Trailer code..."
                           />
                         </Td>
                         <Td>
