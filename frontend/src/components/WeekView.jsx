@@ -277,12 +277,11 @@ function JobCard({
           title={`${job.client || "New Client"}${shortKey ? ` (#${shortKey})` : ""}`}
         >
           <div className="flex items-center gap-2 min-w-0">
-            <span className="truncate">{job.client || "New Client"}</span>
             {job?.client ? (
               <span className={`shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-semibold ${badgeBase}`}>
                 {job.client}
               </span>
-            ) : null}
+            ) : "New Client"}
             {shortKey ? (
               <span className={`shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-semibold ${badgeBase}`}>
                 #{shortKey}
